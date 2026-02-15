@@ -1,5 +1,7 @@
 mod commands;
 mod crdt;
+#[cfg(feature = "dev-server")]
+mod dev_server;
 mod node;
 mod protocol;
 mod storage;
@@ -74,6 +76,23 @@ pub fn run() {
                         .ok();
                 }
             }
+            // launch the dev http server when compiled with the dev-server feature
+            // available at http://127.0.0.1:3333 (or DUSK_DEV_PORT)
+            #[cfg(feature = "dev-server")]
+            {
+                use tauri::Manager;
+                let state = app.state::<AppState>();
+                let dev_state = dev_server::DevState {
+                    identity: std::sync::Arc::clone(&state.identity),
+                    crdt_engine: std::sync::Arc::clone(&state.crdt_engine),
+                    storage: std::sync::Arc::clone(&state.storage),
+                    node_handle: std::sync::Arc::clone(&state.node_handle),
+                    voice_channels: std::sync::Arc::clone(&state.voice_channels),
+                    app_handle: app.handle().clone(),
+                };
+                tauri::async_runtime::spawn(dev_server::start(dev_state));
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -58,6 +58,12 @@ dotenvy = "0.15"
 # async utilities
 futures = "0.3"
 
+# dev-only http api (behind feature flag, never in production)
+axum = { version = "0.7", optional = true }
+
+[features]
+dev-server = ["axum"]
+
 # platform-specific: webview media permissions on linux
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"
