@@ -730,7 +730,45 @@ pub async fn start(
                                     continue;
                                 }
 
+                                // never expose relay infrastructure in the user directory
+                                if Some(discovered_peer) == relay_peer {
+                                    continue;
+                                }
+
                                 log::info!("discovered peer {} via rendezvous", discovered_peer);
+
+                                // cache a placeholder entry so global discovery is visible
+                                // before we receive the peer's signed profile announcement
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as u64;
+                                let discovered_peer_str = discovered_peer.to_string();
+                                let already_known = storage
+                                    .load_directory()
+                                    .ok()
+                                    .map(|d| d.contains_key(&discovered_peer_str))
+                                    .unwrap_or(false);
+
+                                // add a lightweight placeholder if we have not learned this peer's profile yet
+                                if !already_known {
+                                    let placeholder = DirectoryEntry {
+                                        peer_id: discovered_peer_str.clone(),
+                                        display_name: "discovered peer".to_string(),
+                                        bio: String::new(),
+                                        public_key: String::new(),
+                                        last_seen: now,
+                                        is_friend: false,
+                                    };
+                                    let _ = storage.save_directory_entry(&placeholder);
+
+                                    let _ = app_handle.emit("dusk-event", DuskEvent::ProfileReceived {
+                                        peer_id: placeholder.peer_id,
+                                        display_name: placeholder.display_name,
+                                        bio: placeholder.bio,
+                                        public_key: placeholder.public_key,
+                                    });
+                                }
 
                                 // connect through the relay circuit so neither peer reveals their IP
                                 if let Some(ref relay_addr) = relay_multiaddr {

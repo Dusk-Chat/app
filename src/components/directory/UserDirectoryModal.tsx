@@ -3,6 +3,7 @@ import {
   createSignal,
   createMemo,
   createEffect,
+  onCleanup,
   For,
   Show,
 } from "solid-js";
@@ -29,6 +30,7 @@ import { identity } from "../../stores/identity";
 import { setActiveDM } from "../../stores/dms";
 import { addDMConversation } from "../../stores/dms";
 import * as tauri from "../../lib/tauri";
+import type { DirectoryEntry } from "../../lib/types";
 
 interface UserDirectoryModalProps {
   isOpen: boolean;
@@ -41,10 +43,18 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activeTab, setActiveTab] = createSignal<DirectoryTab>("all");
   const [copiedId, setCopiedId] = createSignal<string | null>(null);
+  const [isSearching, setIsSearching] = createSignal(false);
+  const [searchResults, setSearchResults] = createSignal<DirectoryEntry[] | null>(
+    null,
+  );
 
   // reload directory from disk and trigger fresh discovery when modal opens
   createEffect(() => {
     if (props.isOpen) {
+      setSearchQuery("");
+      setIsSearching(false);
+      setSearchResults(null);
+
       // refresh the in-memory peer list from disk so any profiles received
       // while the modal was closed are visible immediately
       tauri.getKnownPeers().then((peers) => {
@@ -59,13 +69,46 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
     }
   });
 
+  createEffect(() => {
+    if (!props.isOpen) return;
+
+    const query = searchQuery().trim();
+    if (!query) {
+      setIsSearching(false);
+      setSearchResults(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearching(true);
+    const searchTimeout = window.setTimeout(async () => {
+      try {
+        const results = await tauri.searchDirectory(query);
+        if (!cancelled) {
+          setSearchResults(results);
+          setIsSearching(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setIsSearching(false);
+          setSearchResults(null);
+        }
+      }
+    }, 180);
+
+    onCleanup(() => {
+      cancelled = true;
+      window.clearTimeout(searchTimeout);
+    });
+  });
+
   // filter out our own peer id from the directory
   const filteredPeers = createMemo(() => {
     const myId = identity()?.peer_id;
     const query = searchQuery().toLowerCase().trim();
     const tab = activeTab();
 
-    let peers = knownPeers();
+    let peers = (searchResults() ?? knownPeers()).filter((p) => p.peer_id !== myId);
 
     if (tab === "friends") {
       peers = peers.filter((p) => p.is_friend);
@@ -77,9 +120,6 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
           p.display_name.toLowerCase().includes(query) ||
           p.peer_id.toLowerCase().includes(query),
       );
-    } else {
-      // if not searching, hide self from the list to avoid confusion
-      peers = peers.filter((p) => p.peer_id !== myId);
     }
 
     return peers;
@@ -195,6 +235,11 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
                   onInput={(e) => setSearchQuery(e.currentTarget.value)}
                 />
               </div>
+              <Show when={isSearching() && searchQuery().trim().length > 0}>
+                <p class="mt-2 text-[11px] font-mono text-white/35">
+                  searching directory...
+                </p>
+              </Show>
             </div>
 
             <Divider class="mx-6" />
@@ -207,8 +252,10 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
                   <div class="flex flex-col items-center justify-center py-16">
                     <Users size={48} class="text-white/10 mb-4" />
                     <p class="text-[16px] text-white/30 mb-1">
-                      {searchQuery()
-                        ? "no peers matching your search"
+                      {searchQuery().trim().length > 0
+                        ? isSearching()
+                          ? "searching directory"
+                          : "no peers matching your search"
                         : activeTab() === "friends"
                           ? "no friends added yet"
                           : "no peers discovered yet"}

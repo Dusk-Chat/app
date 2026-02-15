@@ -31,7 +31,13 @@ export function updatePeerProfile(
       // update existing peer
       return prev.map((p) =>
         p.peer_id === peerId
-          ? { ...p, display_name: displayName, bio, last_seen: now }
+          ? {
+              ...p,
+              display_name: displayName,
+              bio,
+              public_key: publicKey || p.public_key,
+              last_seen: now,
+            }
           : p,
       );
     } else {
