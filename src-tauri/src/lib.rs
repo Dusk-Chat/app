@@ -90,6 +90,7 @@ pub fn run() {
             commands::identity::add_friend,
             commands::identity::remove_friend,
             commands::identity::discover_global_peers,
+            commands::identity::set_relay_address,
             commands::identity::reset_identity,
             commands::chat::send_message,
             commands::chat::get_messages,

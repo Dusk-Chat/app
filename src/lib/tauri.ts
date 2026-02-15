@@ -206,6 +206,10 @@ export async function discoverGlobalPeers(): Promise<void> {
   return invoke("discover_global_peers");
 }
 
+export async function setRelayAddress(relayAddr: string): Promise<void> {
+  return invoke("set_relay_address", { relayAddr });
+}
+
 export async function resetIdentity(): Promise<void> {
   return invoke("reset_identity");
 }

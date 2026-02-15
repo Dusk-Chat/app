@@ -65,6 +65,9 @@ export interface UserSettings {
   // appearance
   message_display: "cozy" | "compact";
   font_size: "small" | "default" | "large";
+
+  // network
+  custom_relay_addr?: string;
 }
 
 export interface CommunityMeta {

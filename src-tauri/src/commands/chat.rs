@@ -17,12 +17,20 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
         .as_ref()
         .ok_or("no identity loaded, create one first")?;
 
+    // load custom relay address from settings if configured
+    let custom_relay = state
+        .storage
+        .load_settings()
+        .ok()
+        .and_then(|s| s.custom_relay_addr);
+
     let handle = node::start(
         id.keypair.clone(),
         state.crdt_engine.clone(),
         state.storage.clone(),
         app,
         state.voice_channels.clone(),
+        custom_relay,
     )
     .await?;
 

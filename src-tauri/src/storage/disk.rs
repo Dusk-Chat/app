@@ -22,6 +22,8 @@ pub struct UserSettings {
     pub allow_dms_from_anyone: bool,
     pub message_display: String,
     pub font_size: String,
+    #[serde(default)]
+    pub custom_relay_addr: Option<String>,
 }
 
 impl Default for UserSettings {
@@ -36,6 +38,7 @@ impl Default for UserSettings {
             show_online_status: true,
             allow_dms_from_anyone: true,
             message_display: "cozy".to_string(),
+            custom_relay_addr: None,
             font_size: "default".to_string(),
         }
     }

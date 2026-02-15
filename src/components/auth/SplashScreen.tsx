@@ -5,9 +5,11 @@ import {
   onMount,
   Show,
   onCleanup,
+  For,
 } from "solid-js";
 import type { PublicIdentity } from "../../lib/types";
-import { checkInternetConnectivity } from "../../lib/tauri";
+import { checkInternetConnectivity, setRelayAddress } from "../../lib/tauri";
+import Button from "../common/Button";
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -23,6 +25,24 @@ const SplashScreen: Component<SplashScreenProps> = (props) => {
   const [retrying, setRetrying] = createSignal(false);
   // null = not checked yet, true = internet works, false = no internet
   const [hasInternet, setHasInternet] = createSignal<boolean | null>(null);
+  const [showRelayPicker, setShowRelayPicker] = createSignal(false);
+  const [customRelay, setCustomRelay] = createSignal("");
+
+  // alternative public relays (would be populated from a discovery service in production)
+  const alternativeRelays = [
+    {
+      name: "primary relay (default)",
+      addr: "/dns4/relay.duskchat.app/tcp/4001/p2p/12D3KooWGQkCkACcibJPKzus7Q6U1aYngfTuS4gwYwmJkJJtrSaw",
+    },
+    {
+      name: "us-west relay",
+      addr: "/dns4/relay-us-west.duskchat.app/tcp/4001/p2p/12D3KooWExample1",
+    },
+    {
+      name: "eu-central relay",
+      addr: "/dns4/relay-eu.duskchat.app/tcp/4001/p2p/12D3KooWExample2",
+    },
+  ];
 
   // refs for exit SMIL animations so we can trigger them programmatically
   let exitOrangeCx: SVGAnimateElement | undefined;
@@ -230,6 +250,108 @@ const SplashScreen: Component<SplashScreenProps> = (props) => {
             {connectivityHint()}
           </p>
         </Show>
+
+        {/* show relay picker button if relay is unreachable but internet works */}
+        <Show when={retrying() && hasInternet()}>
+          <div class="flex flex-col items-center gap-3 mt-4">
+            <p class="text-white/50 text-xs font-sans">
+              the default relay may be at capacity or offline
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowRelayPicker(true)}
+            >
+              choose a different relay
+            </Button>
+          </div>
+        </Show>
+
+        {/* relay picker modal */}
+        <Show when={showRelayPicker()}>
+          <div class="fixed inset-0 z-10000 bg-black/90 flex items-center justify-center">
+            <div class="bg-gray-900 border-2 border-white/20 p-6 max-w-md w-full mx-4">
+              <h2 class="text-white text-lg font-sans mb-4">select a relay</h2>
+              <p class="text-white/60 text-sm font-sans mb-6">
+                choose an alternative relay server or enter a custom address
+              </p>
+
+              <div class="space-y-2 mb-6">
+                <For each={alternativeRelays}>
+                  {(relay) => (
+                    <button
+                      class="w-full text-left px-4 py-3 bg-gray-800 hover:bg-gray-700 border border-white/10 hover:border-accent transition-colors"
+                      onClick={async () => {
+                        try {
+                          await setRelayAddress(relay.addr);
+                          setShowRelayPicker(false);
+                          // restart the connection cycle
+                          setRetrying(false);
+                          setHasInternet(null);
+                          startCycle();
+                        } catch (e) {
+                          console.error("failed to switch relay:", e);
+                        }
+                      }}
+                    >
+                      <div class="text-white text-sm font-sans">{relay.name}</div>
+                      <div class="text-white/40 text-xs font-mono mt-1 truncate">
+                        {relay.addr}
+                      </div>
+                    </button>
+                  )}
+                </For>
+              </div>
+
+              <div class="mb-4">
+                <label class="text-white/60 text-xs font-sans mb-2 block">
+                  or enter custom relay address
+                </label>
+                <input
+                  type="text"
+                  class="w-full bg-gray-800 border border-white/10 px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-accent"
+                  placeholder="/dns4/relay.example.com/tcp/4001/p2p/12D3..."
+                  value={customRelay()}
+                  onInput={(e) => setCustomRelay(e.currentTarget.value)}
+                />
+              </div>
+
+              <div class="flex gap-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowRelayPicker(false)}
+                  class="flex-1"
+                >
+                  cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!customRelay().trim()}
+                  onClick={async () => {
+                    try {
+                      await setRelayAddress(customRelay());
+                      setShowRelayPicker(false);
+                      setCustomRelay("");
+                      // restart the connection cycle
+                      setRetrying(false);
+                      setHasInternet(null);
+                      startCycle();
+                    } catch (e) {
+                      console.error("failed to switch to custom relay:", e);
+                      alert(`Invalid relay address: ${e}`);
+                    }
+                  }}
+                  class="flex-1"
+                >
+                  connect
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Show>
+
         <Show when={showWelcome() && props.identity}>
           <p class="text-white/60 text-sm font-sans">
             connected to dusk chat, welcome {props.identity?.display_name}!

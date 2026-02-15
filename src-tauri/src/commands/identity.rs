@@ -274,6 +274,42 @@ pub async fn discover_global_peers(state: State<'_, AppState>) -> Result<(), Str
     Ok(())
 }
 
+// change relay address and restart the node
+// used when default relay is unreachable or at capacity
+#[tauri::command]
+pub async fn set_relay_address(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    relay_addr: String,
+) -> Result<(), String> {
+    // validate the relay address format
+    let _ = relay_addr
+        .parse::<libp2p::Multiaddr>()
+        .map_err(|_| "invalid relay address format")?;
+
+    // stop the current node if running
+    {
+        let mut node_handle = state.node_handle.lock().await;
+        if let Some(handle) = node_handle.take() {
+            let _ = handle.command_tx.send(crate::node::NodeCommand::Shutdown).await;
+            let _ = handle.task.await;
+        }
+    }
+
+    // update settings with the new relay address
+    let mut settings = state.storage.load_settings().unwrap_or_default();
+    settings.custom_relay_addr = Some(relay_addr);
+    state
+        .storage
+        .save_settings(&settings)
+        .map_err(|e| format!("failed to save settings: {}", e))?;
+
+    // restart the node with the new relay
+    crate::commands::chat::start_node(app, state).await?;
+
+    Ok(())
+}
+
 // broadcast a revocation to all peers, stop the node, and wipe all local data
 #[tauri::command]
 pub async fn reset_identity(state: State<'_, AppState>) -> Result<(), String> {

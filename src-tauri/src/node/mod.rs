@@ -27,11 +27,13 @@ const PENDING_QUEUE_TTL_SECS: u64 = 600;
 // prevents banner flashing on transient disconnections
 const RELAY_WARN_GRACE_SECS: u64 = 8;
 
-// resolve the relay multiaddr from env or default
-fn relay_addr() -> Option<libp2p::Multiaddr> {
+// resolve the relay multiaddr from env var, custom setting, or default
+// priority: DUSK_RELAY_ADDR env var > custom setting > DEFAULT_RELAY_ADDR
+fn relay_addr(custom_addr: Option<&str>) -> Option<libp2p::Multiaddr> {
     let addr_str = std::env::var("DUSK_RELAY_ADDR")
         .ok()
         .filter(|s| !s.is_empty())
+        .or_else(|| custom_addr.map(|s| s.to_string()))
         .or_else(|| {
             if DEFAULT_RELAY_ADDR.is_empty() {
                 None
@@ -186,6 +188,7 @@ pub async fn start(
     storage: Arc<crate::storage::DiskStorage>,
     app_handle: tauri::AppHandle,
     voice_channels: VoiceChannelMap,
+    custom_relay_addr: Option<String>,
 ) -> Result<NodeHandle, String> {
     let mut swarm_instance =
         swarm::build_swarm(&keypair).map_err(|e| format!("failed to build swarm: {}", e))?;
@@ -207,7 +210,7 @@ pub async fn start(
     );
 
     // resolve the relay address for WAN connectivity
-    let relay_multiaddr = relay_addr();
+    let relay_multiaddr = relay_addr(custom_relay_addr.as_deref());
     let relay_peer_id = relay_multiaddr.as_ref().and_then(peer_id_from_multiaddr);
 
     // if a relay is configured, dial it immediately
@@ -218,7 +221,13 @@ pub async fn start(
         log::info!("dialing relay at {}", addr);
         if let Err(e) = swarm_instance.dial(addr.clone()) {
             log::warn!("failed to dial relay: {}", e);
+            // emit disconnected status immediately if dial fails
+            let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: false });
         }
+    } else {
+        // if relay address is invalid or not configured, emit disconnected status
+        log::warn!("no valid relay address configured, running in LAN-only mode");
+        let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: false });
     }
 
     let task = tauri::async_runtime::spawn(async move {
