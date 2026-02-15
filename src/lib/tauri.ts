@@ -202,6 +202,10 @@ export async function removeFriend(peerId: string): Promise<void> {
   return invoke("remove_friend", { peerId });
 }
 
+export async function discoverGlobalPeers(): Promise<void> {
+  return invoke("discover_global_peers");
+}
+
 export async function resetIdentity(): Promise<void> {
   return invoke("reset_identity");
 }

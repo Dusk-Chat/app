@@ -1,4 +1,11 @@
-import { Component, createSignal, createMemo, For, Show } from "solid-js";
+import {
+  Component,
+  createSignal,
+  createMemo,
+  createEffect,
+  For,
+  Show,
+} from "solid-js";
 import { Portal } from "solid-js/web";
 import {
   X,
@@ -33,6 +40,17 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activeTab, setActiveTab] = createSignal<DirectoryTab>("all");
   const [copiedId, setCopiedId] = createSignal<string | null>(null);
+
+  // trigger global peer discovery when modal opens
+  createEffect(() => {
+    if (props.isOpen) {
+      // discover peers registered on the relay's global "dusk/peers" namespace
+      // this allows finding online peers without sharing a community
+      tauri.discoverGlobalPeers().catch((e) => {
+        console.error("failed to discover global peers:", e);
+      });
+    }
+  });
 
   // filter out our own peer id from the directory
   const filteredPeers = createMemo(() => {

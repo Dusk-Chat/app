@@ -21,17 +21,34 @@ export function updatePeerProfile(
   peerId: string,
   displayName: string,
   bio: string,
+  publicKey: string,
 ) {
   const now = Date.now();
 
-  setKnownPeers((prev) =>
-    prev.map((p) =>
-      p.peer_id === peerId
-        ? { ...p, display_name: displayName, bio, last_seen: now }
-        : p,
-    ),
-  );
+  setKnownPeers((prev) => {
+    const existing = prev.find((p) => p.peer_id === peerId);
+    if (existing) {
+      // update existing peer
+      return prev.map((p) =>
+        p.peer_id === peerId
+          ? { ...p, display_name: displayName, bio, last_seen: now }
+          : p,
+      );
+    } else {
+      // add new peer that just announced themselves
+      const newEntry: DirectoryEntry = {
+        peer_id: peerId,
+        display_name: displayName,
+        bio,
+        public_key: publicKey,
+        last_seen: now,
+        is_friend: false,
+      };
+      return [...prev, newEntry];
+    }
+  });
 
+  // update friends list if this peer is a friend
   setFriends((prev) =>
     prev.map((p) =>
       p.peer_id === peerId

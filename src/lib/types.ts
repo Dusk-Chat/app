@@ -174,7 +174,12 @@ export type DuskEvent =
   | { kind: "sync_complete"; payload: { community_id: string } }
   | {
       kind: "profile_received";
-      payload: { peer_id: string; display_name: string; bio: string };
+      payload: {
+        peer_id: string;
+        display_name: string;
+        bio: string;
+        public_key: string;
+      };
     }
   | { kind: "profile_revoked"; payload: { peer_id: string } }
   | { kind: "relay_status"; payload: { connected: boolean } }

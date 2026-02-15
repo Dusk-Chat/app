@@ -157,6 +157,16 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
                 namespace: personal_ns,
             })
             .await;
+
+        // register under the global "dusk/peers" namespace so any peer can
+        // discover us via the relay tracker, enabling global peer discovery
+        // without exposing ip addresses (all connections use relay circuit)
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::RegisterRendezvous {
+                namespace: "dusk/peers".to_string(),
+            })
+            .await;
     }
 
     Ok(())

@@ -118,6 +118,7 @@ pub enum DuskEvent {
         peer_id: String,
         display_name: String,
         bio: String,
+        public_key: String,
     },
     #[serde(rename = "profile_revoked")]
     ProfileRevoked { peer_id: String },
@@ -396,6 +397,7 @@ pub async fn start(
                                             peer_id: profile.peer_id,
                                             display_name: profile.display_name,
                                             bio: profile.bio,
+                                            public_key: profile.public_key,
                                         });
                                     }
                                     crate::protocol::messages::GossipMessage::ProfileRevoke(revocation) => {

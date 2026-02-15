@@ -342,6 +342,7 @@ const App: Component = () => {
           event.payload.peer_id,
           event.payload.display_name,
           event.payload.bio,
+          event.payload.public_key,
         );
         // keep dm conversation names in sync
         updateDMPeerDisplayName(

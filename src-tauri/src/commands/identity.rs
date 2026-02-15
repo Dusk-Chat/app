@@ -258,6 +258,22 @@ pub async fn remove_friend(state: State<'_, AppState>, peer_id: String) -> Resul
         .map_err(|e| format!("failed to remove friend: {}", e))
 }
 
+// discover online peers via the global relay tracker namespace
+// this allows finding peers without sharing a community or knowing their peer_id
+#[tauri::command]
+pub async fn discover_global_peers(state: State<'_, AppState>) -> Result<(), String> {
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let _ = handle
+            .command_tx
+            .send(crate::node::NodeCommand::DiscoverRendezvous {
+                namespace: "dusk/peers".to_string(),
+            })
+            .await;
+    }
+    Ok(())
+}
+
 // broadcast a revocation to all peers, stop the node, and wipe all local data
 #[tauri::command]
 pub async fn reset_identity(state: State<'_, AppState>) -> Result<(), String> {
