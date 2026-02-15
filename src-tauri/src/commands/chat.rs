@@ -6,7 +6,9 @@ use tokio::time::{timeout, Duration};
 
 use crate::node::gossip;
 use crate::node::{self, NodeCommand};
-use crate::protocol::messages::{ChatMessage, GossipMessage, ProfileAnnouncement, TypingIndicator};
+use crate::protocol::messages::{
+    ChatMessage, GossipMessage, PeerStatus, ProfileAnnouncement, TypingIndicator,
+};
 use crate::verification;
 use crate::AppState;
 
@@ -175,6 +177,24 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
                 namespace: "dusk/peers".to_string(),
             })
             .await;
+
+        // broadcast our initial presence status from saved settings
+        let initial_status = state
+            .storage
+            .load_settings()
+            .map(|s| match s.status.as_str() {
+                "idle" => PeerStatus::Idle,
+                "dnd" => PeerStatus::Dnd,
+                "invisible" => PeerStatus::Offline,
+                _ => PeerStatus::Online,
+            })
+            .unwrap_or(PeerStatus::Online);
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::BroadcastPresence {
+                status: initial_status,
+            })
+            .await;
     }
 
     Ok(())
@@ -185,6 +205,13 @@ pub async fn stop_node(state: State<'_, AppState>) -> Result<(), String> {
     let mut node_handle = state.node_handle.lock().await;
 
     if let Some(handle) = node_handle.take() {
+        // broadcast offline presence before shutting down
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::BroadcastPresence {
+                status: PeerStatus::Offline,
+            })
+            .await;
         let _ = handle.command_tx.send(NodeCommand::Shutdown).await;
         let _ = handle.task.await;
     }
@@ -280,6 +307,31 @@ pub async fn send_typing(state: State<'_, AppState>, channel_id: String) -> Resu
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage { topic, data })
+            .await;
+    }
+
+    Ok(())
+}
+
+// broadcast current user status to all joined communities
+#[tauri::command]
+pub async fn broadcast_presence(state: State<'_, AppState>, status: String) -> Result<(), String> {
+    let peer_status = match status.as_str() {
+        "online" => PeerStatus::Online,
+        "idle" => PeerStatus::Idle,
+        "dnd" => PeerStatus::Dnd,
+        // invisible users appear offline to others
+        "invisible" => PeerStatus::Offline,
+        _ => PeerStatus::Online,
+    };
+
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::BroadcastPresence {
+                status: peer_status,
+            })
             .await;
     }
 

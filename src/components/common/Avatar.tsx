@@ -19,6 +19,7 @@ interface AvatarProps {
   status?:
     | "Online"
     | "Idle"
+    | "Dnd"
     | "Offline"
     | "online"
     | "idle"
@@ -39,6 +40,7 @@ const statusColorMap: Record<string, string> = {
   online: "bg-success",
   Idle: "bg-warning",
   idle: "bg-warning",
+  Dnd: "bg-error",
   dnd: "bg-error",
   invisible: "bg-gray-500",
   Offline: "bg-gray-300",

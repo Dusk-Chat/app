@@ -272,3 +272,301 @@ body {
 .splash-fadeout {
   animation: splash-fadeout 500ms ease forwards;
 }
+
+/* tiptap editor styles - single row layout */
+.dusk-editor-row {
+  display: flex;
+  align-items: flex-end;
+  background: var(--color-bg-tertiary);
+  border: 2px solid var(--color-border-default);
+  transition: border-color var(--transition-fast);
+}
+
+.dusk-editor-row.dusk-editor-focused {
+  border-color: var(--color-accent);
+}
+
+.dusk-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 6px 6px 0;
+  flex-shrink: 0;
+}
+
+.dusk-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.dusk-toolbar-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dusk-toolbar-btn.active {
+  color: var(--color-accent);
+}
+
+.dusk-send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: var(--color-accent);
+  color: white;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.dusk-send-btn:hover {
+  background: var(--color-accent-hover);
+}
+
+.dusk-send-btn:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.dusk-editor-content {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--color-text-body);
+  padding: 10px 16px;
+  min-height: 44px;
+  max-height: 200px;
+  overflow-y: auto;
+  outline: none;
+}
+
+.dusk-editor-content p {
+  margin: 0;
+}
+
+.dusk-editor-content p + p {
+  margin-top: 4px;
+}
+
+.dusk-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  font-family: var(--font-mono);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+.dusk-editor-content strong {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.dusk-editor-content em {
+  font-style: italic;
+}
+
+.dusk-editor-content s {
+  text-decoration: line-through;
+  color: var(--color-text-secondary);
+}
+
+.dusk-editor-content code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  color: var(--color-accent);
+}
+
+/* ============================================================
+   picker panels (emoji + gif)
+   ============================================================ */
+.dusk-picker-panel {
+  width: 352px;
+  height: 420px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-default);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.dusk-gif-panel {
+  width: 420px;
+  height: 460px;
+}
+
+.dusk-picker-header {
+  padding: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.dusk-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-bg-tertiary);
+  padding: 6px 10px;
+}
+
+.dusk-picker-tabs {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.dusk-picker-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition:
+    opacity var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.dusk-picker-tab:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dusk-picker-tab.active {
+  opacity: 1;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.dusk-picker-grid-container {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.dusk-picker-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  padding: 4px 0 6px;
+}
+
+.dusk-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.dusk-emoji-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  font-size: 22px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.dusk-emoji-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dusk-gif-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 4px;
+}
+
+.dusk-gif-item {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+.dusk-gif-item:hover {
+  border-color: var(--color-accent);
+}
+
+/* ============================================================
+   message markdown rendering
+   ============================================================ */
+.dusk-msg-content {
+  font-size: 16px;
+  line-height: 22px;
+  color: rgba(255, 255, 255, 0.9);
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.dusk-msg-content strong,
+.dusk-msg-bold {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.dusk-msg-content em,
+.dusk-msg-italic {
+  font-style: italic;
+}
+
+.dusk-msg-content s,
+.dusk-msg-strike {
+  text-decoration: line-through;
+  color: var(--color-text-secondary);
+}
+
+.dusk-msg-code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  color: var(--color-accent);
+}
+
+.dusk-msg-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: opacity var(--transition-fast);
+}
+
+.dusk-msg-link:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.dusk-msg-image-wrapper {
+  white-space: normal;
+}
+
+.dusk-msg-image {
+  max-width: 400px;
+  max-height: 300px;
+  object-fit: contain;
+  margin-top: 4px;
+}

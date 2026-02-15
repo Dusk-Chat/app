@@ -128,7 +128,7 @@ export interface DMConversationMeta {
 export interface Member {
   peer_id: string;
   display_name: string;
-  status: "Online" | "Idle" | "Offline";
+  status: "Online" | "Idle" | "Dnd" | "Offline";
   roles: string[];
   trust_level: number;
   joined_at: number;
@@ -165,6 +165,19 @@ export interface VoiceParticipant {
   media_state: VoiceMediaState;
 }
 
+// gif search result from the relay klipy proxy
+export interface GifResult {
+  id: string;
+  title: string;
+  url: string;
+  preview: string;
+  dims: [number, number];
+}
+
+export interface GifResponse {
+  results: GifResult[];
+}
+
 // discriminated union for events emitted from rust
 export type DuskEvent =
   | { kind: "message_received"; payload: ChatMessage }
@@ -172,6 +185,10 @@ export type DuskEvent =
   | { kind: "member_kicked"; payload: { peer_id: string } }
   | { kind: "peer_connected"; payload: { peer_id: string } }
   | { kind: "peer_disconnected"; payload: { peer_id: string } }
+  | {
+      kind: "presence_updated";
+      payload: { peer_id: string; status: string };
+    }
   | { kind: "typing"; payload: { peer_id: string; channel_id: string } }
   | { kind: "node_status"; payload: NodeStatus }
   | { kind: "sync_complete"; payload: { community_id: string } }

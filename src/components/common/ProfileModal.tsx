@@ -22,13 +22,14 @@ import {
 } from "lucide-solid";
 import Avatar from "./Avatar";
 import { profileModalPeerId, closeProfileModal } from "../../stores/ui";
-import { members } from "../../stores/members";
+import { members, isPeerOnline } from "../../stores/members";
 import {
   knownPeers,
   markAsFriend,
   unmarkAsFriend,
 } from "../../stores/directory";
 import { identity } from "../../stores/identity";
+import { settings } from "../../stores/settings";
 import { communities } from "../../stores/communities";
 import * as tauri from "../../lib/tauri";
 import { formatTime } from "../../lib/utils";
@@ -56,13 +57,33 @@ const ProfileModal: Component = () => {
   });
 
   const displayName = () =>
-    memberInfo()?.display_name ?? directoryInfo()?.display_name ?? "Unknown";
+    memberInfo()?.display_name ??
+    directoryInfo()?.display_name ??
+    (isSelf() ? identity()?.display_name : null) ??
+    "Unknown";
 
   const bio = () =>
     directoryInfo()?.bio || (isSelf() ? identity()?.bio : "") || "";
 
   const isFriend = () => directoryInfo()?.is_friend ?? false;
-  const status = () => memberInfo()?.status ?? "Offline";
+  // local user always knows their own status from settings;
+  // remote peers use member list status or online tracking as fallback
+  const status = () => {
+    if (isSelf()) {
+      const s = settings().status;
+      if (s === "invisible") return "Offline";
+      return (s.charAt(0).toUpperCase() + s.slice(1)) as
+        | "Online"
+        | "Idle"
+        | "Dnd"
+        | "Offline";
+    }
+    const member = memberInfo();
+    if (member) return member.status;
+    const id = peerId();
+    if (id && isPeerOnline(id)) return "Online";
+    return "Offline";
+  };
   const roles = () => memberInfo()?.roles ?? [];
   const joinedAt = () => memberInfo()?.joined_at ?? 0;
   const publicKey = () =>

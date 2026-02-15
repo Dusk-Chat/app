@@ -159,6 +159,14 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     settings: UserSettings,
 ) -> Result<(), String> {
+    // check if status changed so we can broadcast the new presence
+    let old_status = state
+        .storage
+        .load_settings()
+        .map(|s| s.status)
+        .unwrap_or_else(|_| "online".to_string());
+    let status_changed = old_status != settings.status;
+
     // also update the identity display name if it changed
     let mut identity = state.identity.lock().await;
     let mut name_changed = false;
@@ -177,6 +185,29 @@ pub async fn save_settings(
         }
     }
     drop(identity);
+
+    // broadcast presence if status changed
+    if status_changed {
+        use crate::node::NodeCommand;
+        use crate::protocol::messages::PeerStatus;
+
+        let peer_status = match settings.status.as_str() {
+            "idle" => PeerStatus::Idle,
+            "dnd" => PeerStatus::Dnd,
+            "invisible" => PeerStatus::Offline,
+            _ => PeerStatus::Online,
+        };
+
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::BroadcastPresence {
+                    status: peer_status,
+                })
+                .await;
+        }
+    }
 
     state
         .storage

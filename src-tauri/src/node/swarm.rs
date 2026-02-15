@@ -3,11 +3,13 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use libp2p::{
-    gossipsub, identify, identity, kad, mdns, noise, ping, rendezvous, tcp, yamux, Swarm,
-    SwarmBuilder,
+    gossipsub, identify, identity, kad, mdns, noise, ping, rendezvous,
+    request_response::{self, cbor, ProtocolSupport},
+    tcp, yamux, Swarm, SwarmBuilder,
 };
 
 use super::behaviour::DuskBehaviour;
+use crate::protocol::gif::{GifRequest, GifResponse, GIF_PROTOCOL};
 
 pub fn build_swarm(
     keypair: &identity::Keypair,
@@ -75,6 +77,12 @@ pub fn build_swarm(
                 identify,
                 // ping every 30s to keep the relay connection alive
                 ping: ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(30))),
+                // gif search via request-response to the relay (outbound only)
+                gif_service: cbor::Behaviour::<GifRequest, GifResponse>::new(
+                    [(GIF_PROTOCOL, ProtocolSupport::Outbound)],
+                    request_response::Config::default()
+                        .with_request_timeout(Duration::from_secs(15)),
+                ),
             }
         })?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(300)))

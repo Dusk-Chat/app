@@ -13,7 +13,9 @@ export function addTypingPeer(peerId: string) {
   const existing = typingTimeouts.get(peerId);
   if (existing) clearTimeout(existing);
 
-  setTypingPeerIds((prev) => (prev.includes(peerId) ? prev : [...prev, peerId]));
+  setTypingPeerIds((prev) =>
+    prev.includes(peerId) ? prev : [...prev, peerId],
+  );
 
   // auto-remove after 5 seconds of no new typing events
   const timeout = setTimeout(() => {
@@ -46,11 +48,14 @@ export function setPeerOnline(peerId: string) {
     next.add(peerId);
     return next;
   });
-  // also update the member status
+  // update status only if the member isn't already in a non-offline state
+  // (presence_updated events carry the real status, this is a fallback)
   setMembers((prev) =>
     prev.map((m) =>
-      m.peer_id === peerId ? { ...m, status: "Online" as const } : m
-    )
+      m.peer_id === peerId && m.status === "Offline"
+        ? { ...m, status: "Online" as const }
+        : m,
+    ),
   );
 }
 
@@ -60,11 +65,30 @@ export function setPeerOffline(peerId: string) {
     next.delete(peerId);
     return next;
   });
-  // also update the member status
   setMembers((prev) =>
     prev.map((m) =>
-      m.peer_id === peerId ? { ...m, status: "Offline" as const } : m
-    )
+      m.peer_id === peerId ? { ...m, status: "Offline" as const } : m,
+    ),
+  );
+}
+
+// set a peer's status from a presence broadcast
+export function setPeerStatus(
+  peerId: string,
+  status: "Online" | "Idle" | "Dnd" | "Offline",
+) {
+  if (status === "Offline") {
+    setPeerOffline(peerId);
+    return;
+  }
+  // mark them as online in the tracking set
+  setOnlinePeerIds((prev) => {
+    const next = new Set(prev);
+    next.add(peerId);
+    return next;
+  });
+  setMembers((prev) =>
+    prev.map((m) => (m.peer_id === peerId ? { ...m, status } : m)),
   );
 }
 

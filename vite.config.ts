@@ -8,6 +8,16 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [solid(), tailwindcss()],
 
+  // prosemirror deduplication - prevents keyed plugin conflicts with tiptap
+  optimizeDeps: {
+    include: [
+      "prosemirror-state",
+      "prosemirror-transform",
+      "prosemirror-model",
+      "prosemirror-view",
+    ],
+  },
+
   clearScreen: false,
   server: {
     port: 1420,

@@ -9,9 +9,10 @@ import {
   closeProfileCard,
   openProfileModal,
 } from "../../stores/ui";
-import { members } from "../../stores/members";
+import { members, isPeerOnline } from "../../stores/members";
 import { knownPeers } from "../../stores/directory";
 import { identity } from "../../stores/identity";
+import { settings } from "../../stores/settings";
 import { markAsFriend, unmarkAsFriend } from "../../stores/directory";
 import * as tauri from "../../lib/tauri";
 import { formatTime } from "../../lib/utils";
@@ -41,12 +42,30 @@ const ProfileCard: Component = () => {
     memberInfo()?.display_name ??
     directoryInfo()?.display_name ??
     target()?.displayName ??
+    (isSelf() ? identity()?.display_name : null) ??
     "Unknown";
 
   const bio = () =>
     directoryInfo()?.bio || (isSelf() ? identity()?.bio : "") || "";
   const isFriend = () => directoryInfo()?.is_friend ?? false;
-  const status = () => memberInfo()?.status ?? "Offline";
+  // local user always knows their own status from settings;
+  // remote peers use member list status or online tracking as fallback
+  const status = () => {
+    if (isSelf()) {
+      const s = settings().status;
+      if (s === "invisible") return "Offline";
+      return (s.charAt(0).toUpperCase() + s.slice(1)) as
+        | "Online"
+        | "Idle"
+        | "Dnd"
+        | "Offline";
+    }
+    const member = memberInfo();
+    if (member) return member.status;
+    const t = target();
+    if (t && isPeerOnline(t.peerId)) return "Online";
+    return "Offline";
+  };
   const roles = () => memberInfo()?.roles ?? [];
   const joinedAt = () => memberInfo()?.joined_at ?? 0;
 

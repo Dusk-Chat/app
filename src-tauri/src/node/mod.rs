@@ -78,6 +78,10 @@ pub enum NodeCommand {
     GetListenAddrs {
         reply: tokio::sync::oneshot::Sender<Vec<String>>,
     },
+    // broadcast our presence status to all community presence topics
+    BroadcastPresence {
+        status: crate::protocol::messages::PeerStatus,
+    },
     // dial a specific multiaddr (used for relay connections)
     Dial {
         addr: libp2p::Multiaddr,
@@ -89,6 +93,11 @@ pub enum NodeCommand {
     // discover peers on rendezvous under a community namespace
     DiscoverRendezvous {
         namespace: String,
+    },
+    // send a gif search request to the relay peer via request-response
+    GifSearch {
+        request: crate::protocol::gif::GifRequest,
+        reply: tokio::sync::oneshot::Sender<Result<crate::protocol::gif::GifResponse, String>>,
     },
 }
 
@@ -106,6 +115,8 @@ pub enum DuskEvent {
     PeerConnected { peer_id: String },
     #[serde(rename = "peer_disconnected")]
     PeerDisconnected { peer_id: String },
+    #[serde(rename = "presence_updated")]
+    PresenceUpdated { peer_id: String, status: String },
     #[serde(rename = "typing")]
     Typing { peer_id: String, channel_id: String },
     #[serde(rename = "node_status")]
@@ -305,6 +316,12 @@ pub async fn start(
         // all community namespaces we're registered under (for refresh)
         let mut registered_namespaces: HashSet<String> = HashSet::new();
 
+        // pending gif search replies keyed by request_response request id
+        let mut pending_gif_replies: HashMap<
+            libp2p::request_response::OutboundRequestId,
+            tokio::sync::oneshot::Sender<Result<crate::protocol::gif::GifResponse, String>>,
+        > = HashMap::new();
+
         // relay reconnection state with exponential backoff
         let mut relay_backoff_secs = RELAY_INITIAL_BACKOFF_SECS;
         // deferred warning timer -- only notify the frontend after the grace
@@ -409,18 +426,30 @@ pub async fn start(
                                         let _ = app_handle.emit("dusk-event", DuskEvent::MemberKicked { peer_id });
                                     }
                                     crate::protocol::messages::GossipMessage::Presence(update) => {
+                                        // map PeerStatus to a string the frontend understands
+                                        let status_str = match &update.status {
+                                            crate::protocol::messages::PeerStatus::Online => "Online",
+                                            crate::protocol::messages::PeerStatus::Idle => "Idle",
+                                            crate::protocol::messages::PeerStatus::Dnd => "Dnd",
+                                            crate::protocol::messages::PeerStatus::Offline => "Offline",
+                                        };
+                                        let _ = app_handle.emit("dusk-event", DuskEvent::PresenceUpdated {
+                                            peer_id: update.peer_id.clone(),
+                                            status: status_str.to_string(),
+                                        });
+
+                                        // also update online/offline tracking based on status
                                         match update.status {
-                                            crate::protocol::messages::PeerStatus::Online => {
-                                                let _ = app_handle.emit("dusk-event", DuskEvent::PeerConnected {
-                                                    peer_id: update.peer_id,
-                                                });
-                                            }
                                             crate::protocol::messages::PeerStatus::Offline => {
                                                 let _ = app_handle.emit("dusk-event", DuskEvent::PeerDisconnected {
                                                     peer_id: update.peer_id,
                                                 });
                                             }
-                                            _ => {}
+                                            _ => {
+                                                let _ = app_handle.emit("dusk-event", DuskEvent::PeerConnected {
+                                                    peer_id: update.peer_id,
+                                                });
+                                            }
                                         }
                                     }
                                     crate::protocol::messages::GossipMessage::MetaUpdate(meta) => {
@@ -936,6 +965,28 @@ pub async fn start(
                             }
                         }
 
+                        // gif service response from relay
+                        libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::GifService(
+                            libp2p::request_response::Event::Message {
+                                message: libp2p::request_response::Message::Response { request_id, response },
+                                ..
+                            }
+                        )) => {
+                            if let Some(reply) = pending_gif_replies.remove(&request_id) {
+                                let _ = reply.send(Ok(response));
+                            }
+                        }
+                        // gif service outbound failure
+                        libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::GifService(
+                            libp2p::request_response::Event::OutboundFailure { request_id, error, .. }
+                        )) => {
+                            if let Some(reply) = pending_gif_replies.remove(&request_id) {
+                                let _ = reply.send(Err(format!("gif request failed: {:?}", error)));
+                            }
+                        }
+                        // ignore inbound requests (we only send outbound) and other events
+                        libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::GifService(_)) => {}
+
                         _ => {}
                     }
                 }
@@ -1035,6 +1086,36 @@ pub async fn start(
                                 log::warn!("failed to dial {}: {}", addr, e);
                             }
                         }
+                        Some(NodeCommand::BroadcastPresence { status }) => {
+                            // publish presence update on every subscribed community presence topic
+                            let local_id = swarm_instance.local_peer_id().to_string();
+                            let display_name = storage
+                                .load_profile()
+                                .map(|p| p.display_name)
+                                .unwrap_or_else(|_| "unknown".to_string());
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u64;
+                            let update = crate::protocol::messages::PresenceUpdate {
+                                peer_id: local_id,
+                                display_name,
+                                status,
+                                timestamp: now,
+                            };
+                            let msg = crate::protocol::messages::GossipMessage::Presence(update);
+                            if let Ok(data) = serde_json::to_vec(&msg) {
+                                // broadcast to every community presence topic we're subscribed to
+                                let engine = crdt_engine.lock().await;
+                                let community_ids = engine.community_ids();
+                                drop(engine);
+                                for cid in community_ids {
+                                    let topic_str = gossip::topic_for_presence(&cid);
+                                    let ident_topic = libp2p::gossipsub::IdentTopic::new(topic_str);
+                                    let _ = swarm_instance.behaviour_mut().gossipsub.publish(ident_topic, data.clone());
+                                }
+                            }
+                        }
                         Some(NodeCommand::RegisterRendezvous { namespace }) => {
                             if relay_reservation_active {
                                 if let Some(rp) = relay_peer {
@@ -1078,6 +1159,17 @@ pub async fn start(
                                     pending_queued_at = Some(std::time::Instant::now());
                                 }
                                 pending_discoveries.push(namespace);
+                            }
+                        }
+                        Some(NodeCommand::GifSearch { request, reply }) => {
+                            if let Some(rp) = relay_peer {
+                                let request_id = swarm_instance
+                                    .behaviour_mut()
+                                    .gif_service
+                                    .send_request(&rp, request);
+                                pending_gif_replies.insert(request_id, reply);
+                            } else {
+                                let _ = reply.send(Err("not connected to relay".to_string()));
                             }
                         }
                     }

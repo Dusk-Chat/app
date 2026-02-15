@@ -1,7 +1,8 @@
 import type { Component } from "solid-js";
-import { Show, createSignal } from "solid-js";
+import { Show, createSignal, createMemo } from "solid-js";
 import type { ChatMessage } from "../../lib/types";
 import { formatTime, formatTimeShort } from "../../lib/utils";
+import { renderMarkdown, isStandaloneImageUrl } from "../../lib/markdown";
 import { removeMessage } from "../../stores/messages";
 import { activeCommunityId } from "../../stores/communities";
 import { identity } from "../../stores/identity";
@@ -23,6 +24,12 @@ const Message: Component<MessageProps> = (props) => {
 
   const currentUser = () => identity();
   const currentCommunityId = () => activeCommunityId();
+
+  // pre-render markdown content so it only recalculates when content changes
+  const renderedContent = createMemo(() =>
+    renderMarkdown(props.message.content),
+  );
+  const isImage = createMemo(() => isStandaloneImageUrl(props.message.content));
 
   const isOwner = () => {
     const user = currentUser();
@@ -112,9 +119,17 @@ const Message: Component<MessageProps> = (props) => {
           </div>
         </Show>
 
-        <p class="text-[16px] leading-[22px] text-white/90 break-words whitespace-pre-wrap m-0">
-          {props.message.content}
-        </p>
+        <Show
+          when={!isImage()}
+          fallback={
+            <div
+              class="dusk-msg-content dusk-msg-image-wrapper"
+              innerHTML={renderedContent()}
+            />
+          }
+        >
+          <div class="dusk-msg-content" innerHTML={renderedContent()} />
+        </Show>
       </div>
 
       {/* context menu */}

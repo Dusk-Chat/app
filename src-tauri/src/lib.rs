@@ -117,6 +117,7 @@ pub fn run() {
             commands::chat::start_node,
             commands::chat::stop_node,
             commands::chat::check_internet_connectivity,
+            commands::chat::broadcast_presence,
             commands::community::create_community,
             commands::community::join_community,
             commands::community::leave_community,
@@ -143,6 +144,8 @@ pub fn run() {
             commands::dm::delete_dm_conversation,
             commands::dm::send_dm_typing,
             commands::dm::open_dm_conversation,
+            commands::gif::search_gifs,
+            commands::gif::get_trending_gifs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dusk");

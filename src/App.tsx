@@ -55,6 +55,7 @@ import {
   addTypingPeer,
   setPeerOnline,
   setPeerOffline,
+  setPeerStatus,
   removeMember,
 } from "./stores/members";
 import {
@@ -320,6 +321,15 @@ const App: Component = () => {
       case "peer_disconnected":
         setPeerOffline(event.payload.peer_id);
         break;
+      case "presence_updated": {
+        const status = event.payload.status as
+          | "Online"
+          | "Idle"
+          | "Dnd"
+          | "Offline";
+        setPeerStatus(event.payload.peer_id, status);
+        break;
+      }
       case "typing":
         if (event.payload.channel_id === activeChannelId()) {
           addTypingPeer(event.payload.peer_id);

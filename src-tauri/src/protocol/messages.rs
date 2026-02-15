@@ -28,10 +28,11 @@ pub struct PresenceUpdate {
     pub timestamp: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PeerStatus {
     Online,
     Idle,
+    Dnd,
     Offline,
 }
 

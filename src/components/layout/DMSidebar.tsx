@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { For, Show, createSignal } from "solid-js";
-import { MessageCircle, Search, X, Plus } from "lucide-solid";
+import { MessageCircle, Search, X, Plus, Group, Users } from "lucide-solid";
 import {
   dmConversations,
   activeDMPeerId,
@@ -89,7 +89,7 @@ const DMSidebar: Component = () => {
         }`}
         onClick={() => setActiveDM(null)}
       >
-        <MessageCircle size={20} class="shrink-0" />
+        <Users size={18} />
         <span class="font-medium">friends</span>
       </button>
 

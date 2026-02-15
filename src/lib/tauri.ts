@@ -15,6 +15,7 @@ import type {
   VoiceMediaState,
   DirectMessage,
   DMConversationMeta,
+  GifResponse,
 } from "./types";
 
 // -- identity --
@@ -156,6 +157,10 @@ export async function getMembers(communityId: string): Promise<Member[]> {
 
 export async function sendTypingIndicator(channelId: string): Promise<void> {
   return invoke("send_typing", { channelId });
+}
+
+export async function broadcastPresence(status: string): Promise<void> {
+  return invoke("broadcast_presence", { status });
 }
 
 // -- moderation --
@@ -335,4 +340,19 @@ export async function openDMConversation(
   displayName: string,
 ): Promise<DMConversationMeta> {
   return invoke("open_dm_conversation", { peerId, displayName });
+}
+
+// -- gifs --
+
+export async function searchGifs(
+  query: string,
+  limit?: number,
+): Promise<GifResponse> {
+  return invoke("search_gifs", { query, limit });
+}
+
+export async function getTrendingGifs(
+  limit?: number,
+): Promise<GifResponse> {
+  return invoke("get_trending_gifs", { limit });
 }

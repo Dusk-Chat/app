@@ -11,6 +11,7 @@ import { identity } from "../../stores/identity";
 import { settings, updateStatus } from "../../stores/settings";
 import type { UserStatus } from "../../lib/types";
 import Avatar from "../common/Avatar";
+import * as tauri from "../../lib/tauri";
 
 interface UserFooterProps {
   showSettings?: boolean;
@@ -37,6 +38,8 @@ const UserFooter: Component<UserFooterProps> = (props) => {
 
   function handleStatusChange(status: UserStatus) {
     updateStatus(status);
+    // persist and broadcast the new status to peers
+    tauri.saveSettings(settings()).catch(() => {});
     setIsOpen(false);
   }
 
