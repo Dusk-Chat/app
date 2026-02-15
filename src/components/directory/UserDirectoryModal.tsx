@@ -21,6 +21,7 @@ import Button from "../common/Button";
 import Divider from "../common/Divider";
 import {
   knownPeers,
+  setKnownPeers,
   markAsFriend,
   unmarkAsFriend,
 } from "../../stores/directory";
@@ -41,9 +42,15 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
   const [activeTab, setActiveTab] = createSignal<DirectoryTab>("all");
   const [copiedId, setCopiedId] = createSignal<string | null>(null);
 
-  // trigger global peer discovery when modal opens
+  // reload directory from disk and trigger fresh discovery when modal opens
   createEffect(() => {
     if (props.isOpen) {
+      // refresh the in-memory peer list from disk so any profiles received
+      // while the modal was closed are visible immediately
+      tauri.getKnownPeers().then((peers) => {
+        setKnownPeers(peers);
+      }).catch(() => {});
+
       // discover peers registered on the relay's global "dusk/peers" namespace
       // this allows finding online peers without sharing a community
       tauri.discoverGlobalPeers().catch((e) => {

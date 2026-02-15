@@ -181,6 +181,48 @@ fn community_id_from_topic(topic: &str) -> Option<&str> {
 pub type VoiceChannelMap =
     Arc<Mutex<HashMap<String, Vec<crate::protocol::messages::VoiceParticipant>>>>;
 
+// build a signed profile announcement from the keypair and storage
+// used by the event loop to re-announce after relay connection or new peer joins
+fn build_profile_announcement(
+    keypair: &libp2p::identity::Keypair,
+    storage: &crate::storage::DiskStorage,
+) -> Option<crate::protocol::messages::ProfileAnnouncement> {
+    let profile = storage.load_profile().ok()?;
+    let proof = storage.load_verification_proof().ok().flatten();
+    let peer_id = libp2p::PeerId::from(keypair.public());
+
+    let mut announcement = crate::protocol::messages::ProfileAnnouncement {
+        peer_id: peer_id.to_string(),
+        display_name: profile.display_name,
+        bio: profile.bio,
+        public_key: hex::encode(keypair.public().encode_protobuf()),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+        verification_proof: proof,
+        signature: String::new(),
+    };
+    announcement.signature = verification::sign_announcement(keypair, &announcement);
+    Some(announcement)
+}
+
+// publish our profile on the directory gossipsub topic so connected peers
+// learn about us and add us to their local directory
+fn publish_profile(
+    swarm: &mut libp2p::Swarm<behaviour::DuskBehaviour>,
+    keypair: &libp2p::identity::Keypair,
+    storage: &crate::storage::DiskStorage,
+) {
+    if let Some(announcement) = build_profile_announcement(keypair, storage) {
+        let msg = crate::protocol::messages::GossipMessage::ProfileAnnounce(announcement);
+        if let Ok(data) = serde_json::to_vec(&msg) {
+            let topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_directory());
+            let _ = swarm.behaviour_mut().gossipsub.publish(topic, data);
+        }
+    }
+}
+
 // start the p2p node on a background task
 pub async fn start(
     keypair: libp2p::identity::Keypair,
@@ -229,6 +271,10 @@ pub async fn start(
         log::warn!("no valid relay address configured, running in LAN-only mode");
         let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: false });
     }
+
+    // clone the keypair into the event loop so it can re-announce our profile
+    // when new peers connect or the relay comes online
+    let node_keypair = keypair;
 
     let task = tauri::async_runtime::spawn(async move {
         use futures::StreamExt;
@@ -308,6 +354,14 @@ pub async fn start(
                                         }
                                         crate::crdt::sync::SyncMessage::DocumentOffer(snapshot) => {
                                             let mut engine = crdt_engine.lock().await;
+
+                                            // only merge docs for communities we've explicitly joined or created,
+                                            // otherwise any LAN peer would push all their communities to us
+                                            if !engine.has_community(&snapshot.community_id) {
+                                                log::debug!("ignoring document offer for unknown community {}", snapshot.community_id);
+                                                continue;
+                                            }
+
                                             match engine.merge_remote_doc(&snapshot.community_id, &snapshot.doc_bytes) {
                                                 Ok(()) => {
                                                     let _ = app_handle.emit("dusk-event", DuskEvent::SyncComplete {
@@ -571,7 +625,7 @@ pub async fn start(
                                 peer_count: connected_peers.len(),
                             });
 
-                            // sync documents with newly discovered LAN peers
+                            // sync documents and announce profile to newly discovered LAN peers
                             if !peers.is_empty() {
                                 let local_peer_id = *swarm_instance.local_peer_id();
                                 let request = crate::crdt::sync::SyncMessage::RequestSync {
@@ -581,6 +635,8 @@ pub async fn start(
                                     let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
                                     let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
                                 }
+
+                                publish_profile(&mut swarm_instance, &node_keypair, &storage);
                             }
                         }
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::Mdns(
@@ -646,6 +702,12 @@ pub async fn start(
 
                             // queues drained, reset the TTL tracker
                             pending_queued_at = None;
+
+                            // re-announce our profile now that the relay is up
+                            // the initial announcement in start_node fires before
+                            // any WAN peers are reachable, so this ensures remote
+                            // peers learn about us once the relay mesh is live
+                            publish_profile(&mut swarm_instance, &node_keypair, &storage);
                         }
 
                         // --- rendezvous client events ---
@@ -767,6 +829,13 @@ pub async fn start(
                             if let Ok(data) = serde_json::to_vec(&request) {
                                 let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
                                 let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                            }
+
+                            // re-announce our profile so the new peer adds us to
+                            // their directory. skip the relay itself since it does
+                            // not participate in the gossipsub directory mesh.
+                            if Some(peer_id) != relay_peer {
+                                publish_profile(&mut swarm_instance, &node_keypair, &storage);
                             }
                         }
                         libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, num_established, .. } => {

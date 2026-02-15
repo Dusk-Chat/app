@@ -1,6 +1,20 @@
-# dusk chat
+<div align="center">
+  <img src="src-tauri/icons/128x128.png" alt="dusk chat" width="100" />
 
-a peer-to-peer community chat platform. no central server. your data stays yours.
+  <h1>dusk chat</h1>
+  <p>a peer-to-peer community chat platform. no central server. your data stays yours.</p>
+
+  <p>
+    <img alt="version" src="https://img.shields.io/badge/version-0.1.0-FF4F00?style=flat-square&labelColor=000000" />
+    <img alt="license" src="https://img.shields.io/badge/license-MIT-FF4F00?style=flat-square&labelColor=000000" />
+    <img alt="rust" src="https://img.shields.io/badge/rust-stable-FF4F00?style=flat-square&logo=rust&logoColor=white&labelColor=000000" />
+    <img alt="tauri" src="https://img.shields.io/badge/tauri-v2-FF4F00?style=flat-square&logo=tauri&logoColor=white&labelColor=000000" />
+    <img alt="solid-js" src="https://img.shields.io/badge/solid--js-1.9-FF4F00?style=flat-square&logo=solid&logoColor=white&labelColor=000000" />
+    <img alt="p2p" src="https://img.shields.io/badge/libp2p-peer--to--peer-FF4F00?style=flat-square&logo=libp2p&logoColor=white&labelColor=000000" />
+  </p>
+</div>
+
+---
 
 ## what is dusk chat
 
@@ -23,6 +37,155 @@ dusk chat is a decentralized alternative to discord. every user runs a full node
 - **bun**: package manager for frontend (https://bun.sh)
 - **rust**: for backend and relay server (https://rustup.rs)
 - **node**: for tauri cli (comes with bun)
+
+### system dependencies
+
+dusk chat is built on tauri v2, which requires platform-specific system libraries. install the dependencies for your OS before building.
+
+#### linux
+
+<details>
+<summary>debian / ubuntu</summary>
+
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev \
+  build-essential \
+  curl \
+  wget \
+  file \
+  libxdo-dev \
+  libssl-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev
+```
+
+</details>
+
+<details>
+<summary>arch / manjaro</summary>
+
+```bash
+sudo pacman -Syu
+sudo pacman -S --needed \
+  webkit2gtk-4.1 \
+  base-devel \
+  curl \
+  wget \
+  file \
+  openssl \
+  appmenu-gtk-module \
+  libappindicator-gtk3 \
+  librsvg \
+  xdotool
+```
+
+</details>
+
+<details>
+<summary>fedora</summary>
+
+```bash
+sudo dnf check-update
+sudo dnf install webkit2gtk4.1-devel \
+  openssl-devel \
+  curl \
+  wget \
+  file \
+  libappindicator-gtk3-devel \
+  librsvg2-devel \
+  libxdo-devel
+sudo dnf group install "c-development"
+```
+
+</details>
+
+<details>
+<summary>gentoo</summary>
+
+```bash
+sudo emerge --ask \
+  net-libs/webkit-gtk:4.1 \
+  dev-libs/libappindicator \
+  net-misc/curl \
+  net-misc/wget \
+  sys-apps/file
+```
+
+</details>
+
+<details>
+<summary>opensuse</summary>
+
+```bash
+sudo zypper up
+sudo zypper in webkit2gtk3-devel \
+  libopenssl-devel \
+  curl \
+  wget \
+  file \
+  libappindicator3-1 \
+  librsvg-devel
+sudo zypper in -t pattern devel_basis
+```
+
+</details>
+
+<details>
+<summary>alpine</summary>
+
+```bash
+sudo apk add \
+  build-base \
+  webkit2gtk-4.1-dev \
+  curl \
+  wget \
+  file \
+  openssl \
+  libayatana-appindicator-dev \
+  librsvg
+```
+
+note: alpine containers don't include fonts by default. install at least one font package (e.g. `font-dejavu`) for text to render correctly.
+
+</details>
+
+<details>
+<summary>ostree (silverblue / kinoite)</summary>
+
+```bash
+sudo rpm-ostree install webkit2gtk4.1-devel \
+  openssl-devel \
+  curl \
+  wget \
+  file \
+  libappindicator-gtk3-devel \
+  librsvg2-devel \
+  libxdo-devel \
+  gcc \
+  gcc-c++ \
+  make
+sudo systemctl reboot
+```
+
+</details>
+
+<details>
+<summary>nixos</summary>
+
+see the [nixos wiki page for tauri](https://wiki.nixos.org/wiki/Tauri).
+
+</details>
+
+#### macos
+
+install [xcode](https://developer.apple.com/xcode/resources/) from the mac app store or the apple developer website. launch it once after installing so it finishes setup.
+
+#### windows
+
+1. install [microsoft c++ build tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and check "desktop development with c++" during setup
+2. webview2 is pre-installed on windows 10 (1803+) and windows 11. if you're on an older version, install the [webview2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
+3. install rust via [rustup](https://rustup.rs) or `winget install --id Rustlang.Rustup` -- make sure the MSVC toolchain is selected as default
 
 ### installation
 
