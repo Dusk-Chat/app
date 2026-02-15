@@ -5,6 +5,7 @@ const [peerCount, setPeerCount] = createSignal(0);
 const [nodeStatus, setNodeStatus] = createSignal<
   "starting" | "running" | "stopped" | "error"
 >("stopped");
+const [relayConnected, setRelayConnected] = createSignal(true);
 
 export {
   isConnected,
@@ -13,4 +14,6 @@ export {
   setPeerCount,
   nodeStatus,
   setNodeStatus,
+  relayConnected,
+  setRelayConnected,
 };

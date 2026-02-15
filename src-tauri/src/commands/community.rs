@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::node::gossip;
 use crate::node::NodeCommand;
-use crate::protocol::community::{ChannelKind, ChannelMeta, CommunityMeta, Member};
+use crate::protocol::community::{CategoryMeta, ChannelKind, ChannelMeta, CommunityMeta, Member};
 use crate::protocol::messages::PeerStatus;
 use crate::AppState;
 
@@ -224,6 +224,8 @@ pub async fn create_channel(
     community_id: String,
     name: String,
     topic: String,
+    kind: Option<String>,
+    category_id: Option<String>,
 ) -> Result<ChannelMeta, String> {
     let mut hasher = Sha256::new();
     hasher.update(community_id.as_bytes());
@@ -236,12 +238,19 @@ pub async fn create_channel(
     let hash = hasher.finalize();
     let channel_id = format!("ch_{}", &hex::encode(hash)[..12]);
 
+    let channel_kind = match kind.as_deref() {
+        Some("voice") | Some("Voice") => ChannelKind::Voice,
+        _ => ChannelKind::Text,
+    };
+
     let channel = ChannelMeta {
         id: channel_id,
         community_id: community_id.clone(),
         name,
         topic,
-        kind: ChannelKind::Text,
+        kind: channel_kind,
+        position: 0,
+        category_id,
     };
 
     let mut engine = state.crdt_engine.lock().await;
@@ -276,6 +285,59 @@ pub async fn get_channels(
 ) -> Result<Vec<ChannelMeta>, String> {
     let engine = state.crdt_engine.lock().await;
     engine.get_channels(&community_id)
+}
+
+#[tauri::command]
+pub async fn create_category(
+    state: State<'_, AppState>,
+    community_id: String,
+    name: String,
+) -> Result<CategoryMeta, String> {
+    let mut hasher = Sha256::new();
+    hasher.update(community_id.as_bytes());
+    hasher.update(name.as_bytes());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    hasher.update(now.to_le_bytes());
+    let hash = hasher.finalize();
+    let category_id = format!("cat_{}", &hex::encode(hash)[..12]);
+
+    let category = CategoryMeta {
+        id: category_id,
+        community_id: community_id.clone(),
+        name,
+        position: 0,
+    };
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.create_category(&community_id, &category)?;
+    drop(engine);
+
+    // broadcast the change via document sync
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let sync_topic = "dusk/sync".to_string();
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::SendMessage {
+                topic: sync_topic,
+                data: community_id.as_bytes().to_vec(),
+            })
+            .await;
+    }
+
+    Ok(category)
+}
+
+#[tauri::command]
+pub async fn get_categories(
+    state: State<'_, AppState>,
+    community_id: String,
+) -> Result<Vec<CategoryMeta>, String> {
+    let engine = state.crdt_engine.lock().await;
+    engine.get_categories(&community_id)
 }
 
 #[tauri::command]
@@ -441,4 +503,31 @@ pub async fn generate_invite(
     };
 
     Ok(invite.encode())
+}
+
+#[tauri::command]
+pub async fn reorder_channels(
+    state: State<'_, AppState>,
+    community_id: String,
+    channel_ids: Vec<String>,
+) -> Result<Vec<ChannelMeta>, String> {
+    let mut engine = state.crdt_engine.lock().await;
+    let channels = engine.reorder_channels(&community_id, &channel_ids)?;
+    drop(engine);
+
+    // broadcast the reordering to peers via document sync
+    // the change will propagate through the existing gossipsub sync mechanism
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let sync_topic = "dusk/sync".to_string();
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::SendMessage {
+                topic: sync_topic,
+                data: community_id.as_bytes().to_vec(),
+            })
+            .await;
+    }
+
+    Ok(channels)
 }

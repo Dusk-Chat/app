@@ -4,11 +4,17 @@ import type {
   PublicIdentity,
   CommunityMeta,
   ChannelMeta,
+  CategoryMeta,
   ChatMessage,
   Member,
   DuskEvent,
   UserSettings,
   DirectoryEntry,
+  ChallengeExport,
+  VoiceParticipant,
+  VoiceMediaState,
+  DirectMessage,
+  DMConversationMeta,
 } from "./types";
 
 // -- identity --
@@ -24,8 +30,9 @@ export async function loadIdentity(): Promise<PublicIdentity | null> {
 export async function createIdentity(
   displayName: string,
   bio?: string,
+  challengeData?: ChallengeExport,
 ): Promise<PublicIdentity> {
-  return invoke("create_identity", { displayName, bio });
+  return invoke("create_identity", { displayName, bio, challengeData });
 }
 
 export async function updateDisplayName(name: string): Promise<void> {
@@ -88,12 +95,40 @@ export async function createChannel(
   communityId: string,
   name: string,
   topic: string,
+  kind?: string,
+  categoryId?: string | null,
 ): Promise<ChannelMeta> {
-  return invoke("create_channel", { communityId, name, topic });
+  return invoke("create_channel", {
+    communityId,
+    name,
+    topic,
+    kind,
+    categoryId,
+  });
 }
 
 export async function getChannels(communityId: string): Promise<ChannelMeta[]> {
   return invoke("get_channels", { communityId });
+}
+
+export async function createCategory(
+  communityId: string,
+  name: string,
+): Promise<CategoryMeta> {
+  return invoke("create_category", { communityId, name });
+}
+
+export async function getCategories(
+  communityId: string,
+): Promise<CategoryMeta[]> {
+  return invoke("get_categories", { communityId });
+}
+
+export async function reorderChannels(
+  communityId: string,
+  channelIds: string[],
+): Promise<ChannelMeta[]> {
+  return invoke("reorder_channels", { communityId, channelIds });
 }
 
 // -- messages --
@@ -171,10 +206,125 @@ export async function resetIdentity(): Promise<void> {
   return invoke("reset_identity");
 }
 
+// -- connectivity --
+
+export async function checkInternetConnectivity(): Promise<boolean> {
+  return invoke("check_internet_connectivity");
+}
+
 // -- events --
 
 export function onDuskEvent(
   callback: (event: DuskEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<DuskEvent>("dusk-event", (e) => callback(e.payload));
+}
+
+// -- voice --
+
+export async function joinVoiceChannel(
+  communityId: string,
+  channelId: string,
+): Promise<VoiceParticipant[]> {
+  return invoke("join_voice_channel", { communityId, channelId });
+}
+
+export async function leaveVoiceChannel(
+  communityId: string,
+  channelId: string,
+): Promise<void> {
+  return invoke("leave_voice_channel", { communityId, channelId });
+}
+
+export async function updateVoiceMediaState(
+  communityId: string,
+  channelId: string,
+  mediaState: VoiceMediaState,
+): Promise<void> {
+  return invoke("update_voice_media_state", {
+    communityId,
+    channelId,
+    mediaState,
+  });
+}
+
+export async function sendVoiceSdp(
+  communityId: string,
+  channelId: string,
+  toPeer: string,
+  sdpType: string,
+  sdp: string,
+): Promise<void> {
+  return invoke("send_voice_sdp", {
+    communityId,
+    channelId,
+    toPeer,
+    sdpType,
+    sdp,
+  });
+}
+
+export async function sendVoiceIceCandidate(
+  communityId: string,
+  channelId: string,
+  toPeer: string,
+  candidate: string,
+  sdpMid: string | null,
+  sdpMlineIndex: number | null,
+): Promise<void> {
+  return invoke("send_voice_ice_candidate", {
+    communityId,
+    channelId,
+    toPeer,
+    candidate,
+    sdpMid,
+    sdpMlineIndex,
+  });
+}
+
+export async function getVoiceParticipants(
+  communityId: string,
+  channelId: string,
+): Promise<VoiceParticipant[]> {
+  return invoke("get_voice_participants", { communityId, channelId });
+}
+
+// -- direct messages --
+
+export async function sendDM(
+  peerId: string,
+  content: string,
+): Promise<DirectMessage> {
+  return invoke("send_dm", { peerId, content });
+}
+
+export async function getDMMessages(
+  peerId: string,
+  before?: number,
+  limit?: number,
+): Promise<DirectMessage[]> {
+  return invoke("get_dm_messages", { peerId, before, limit });
+}
+
+export async function getDMConversations(): Promise<DMConversationMeta[]> {
+  return invoke("get_dm_conversations");
+}
+
+export async function markDMRead(peerId: string): Promise<void> {
+  return invoke("mark_dm_read", { peerId });
+}
+
+export async function deleteDMConversation(peerId: string): Promise<void> {
+  return invoke("delete_dm_conversation", { peerId });
+}
+
+export async function sendDMTyping(peerId: string): Promise<void> {
+  return invoke("send_dm_typing", { peerId });
+}
+
+export async function openDMConversation(
+  peerId: string,
+  displayName: string,
+): Promise<DMConversationMeta> {
+  return invoke("open_dm_conversation", { peerId, displayName });
 }

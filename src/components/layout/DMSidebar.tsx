@@ -6,8 +6,11 @@ import {
   activeDMPeerId,
   setActiveDM,
   clearDMUnread,
+  removeDMConversation,
 } from "../../stores/dms";
+import { onlinePeerIds } from "../../stores/members";
 import { openModal } from "../../stores/ui";
+import * as tauri from "../../lib/tauri";
 import Avatar from "../common/Avatar";
 import Divider from "../common/Divider";
 import SidebarLayout from "../common/SidebarLayout";
@@ -23,9 +26,26 @@ const DMSidebar: Component = () => {
     );
   };
 
+  // derive status from online peer set
+  function peerStatus(peerId: string): "Online" | "Offline" {
+    return onlinePeerIds().has(peerId) ? "Online" : "Offline";
+  }
+
   function handleSelectDM(peerId: string) {
     setActiveDM(peerId);
     clearDMUnread(peerId);
+    // mark as read in the backend
+    tauri.markDMRead(peerId).catch(() => {});
+  }
+
+  async function handleDeleteConversation(e: MouseEvent, peerId: string) {
+    e.stopPropagation();
+    try {
+      await tauri.deleteDMConversation(peerId);
+      removeDMConversation(peerId);
+    } catch (err) {
+      console.error("failed to delete dm conversation:", err);
+    }
   }
 
   const header = (
@@ -86,6 +106,7 @@ const DMSidebar: Component = () => {
           type="button"
           class="text-white/40 hover:text-white transition-colors duration-200 cursor-pointer"
           title="new dm"
+          onClick={() => openModal("directory")}
         >
           <Plus size={14} />
         </button>
@@ -118,7 +139,7 @@ const DMSidebar: Component = () => {
               <Avatar
                 name={dm.display_name}
                 size="sm"
-                status={dm.status}
+                status={peerStatus(dm.peer_id)}
                 showStatus
               />
               <div class="flex-1 min-w-0 text-left">
@@ -126,11 +147,21 @@ const DMSidebar: Component = () => {
                   <span class="text-[14px] font-medium truncate">
                     {dm.display_name}
                   </span>
-                  <Show when={dm.unread_count > 0}>
-                    <span class="w-5 h-5 flex items-center justify-center bg-orange text-white text-[11px] font-bold rounded-full shrink-0">
-                      {dm.unread_count}
-                    </span>
-                  </Show>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <Show when={dm.unread_count > 0}>
+                      <span class="w-5 h-5 flex items-center justify-center bg-orange text-white text-[11px] font-bold rounded-full">
+                        {dm.unread_count}
+                      </span>
+                    </Show>
+                    <button
+                      type="button"
+                      class="w-5 h-5 flex items-center justify-center text-white/0 group-hover:text-white/30 hover:!text-red-400 transition-colors duration-200 cursor-pointer"
+                      title="close conversation"
+                      onClick={(e) => handleDeleteConversation(e, dm.peer_id)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
                 </div>
                 <Show when={dm.last_message}>
                   <p class="text-[12px] text-white/40 truncate mt-0.5">

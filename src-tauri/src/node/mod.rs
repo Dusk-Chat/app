@@ -3,7 +3,7 @@ pub mod discovery;
 pub mod gossip;
 pub mod swarm;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tauri::async_runtime::JoinHandle;
 use tauri::Emitter;
@@ -11,12 +11,11 @@ use tokio::sync::Mutex;
 
 use crate::crdt::CrdtEngine;
 use crate::protocol::identity::DirectoryEntry;
+use crate::verification;
 
-// default relay address - override with DUSK_RELAY_ADDR env var
-// format: /ip4/<ip>/tcp/<port>/p2p/<peer_id>
-// left empty because 0.0.0.0 is a listen address, not a routable dial target.
-// users must set DUSK_RELAY_ADDR to a reachable relay for WAN connectivity.
-const DEFAULT_RELAY_ADDR: &str = "";
+// default public relay - override with DUSK_RELAY_ADDR env var
+const DEFAULT_RELAY_ADDR: &str =
+    "/dns4/relay.duskchat.app/tcp/4001/p2p/12D3KooWGQkCkACcibJPKzus7Q6U1aYngfTuS4gwYwmJkJJtrSaw";
 
 // relay reconnection parameters
 const RELAY_INITIAL_BACKOFF_SECS: u64 = 2;
@@ -24,6 +23,9 @@ const RELAY_MAX_BACKOFF_SECS: u64 = 120;
 const RELAY_BACKOFF_MULTIPLIER: u64 = 2;
 // max time to hold pending rendezvous registrations before discarding (10 min)
 const PENDING_QUEUE_TTL_SECS: u64 = 600;
+// grace period before warning the frontend about relay being down,
+// prevents banner flashing on transient disconnections
+const RELAY_WARN_GRACE_SECS: u64 = 8;
 
 // resolve the relay multiaddr from env or default
 fn relay_addr() -> Option<libp2p::Multiaddr> {
@@ -119,6 +121,50 @@ pub enum DuskEvent {
     },
     #[serde(rename = "profile_revoked")]
     ProfileRevoked { peer_id: String },
+    #[serde(rename = "relay_status")]
+    RelayStatus { connected: bool },
+    #[serde(rename = "voice_participant_joined")]
+    VoiceParticipantJoined {
+        community_id: String,
+        channel_id: String,
+        peer_id: String,
+        display_name: String,
+        media_state: crate::protocol::messages::VoiceMediaState,
+    },
+    #[serde(rename = "voice_participant_left")]
+    VoiceParticipantLeft {
+        community_id: String,
+        channel_id: String,
+        peer_id: String,
+    },
+    #[serde(rename = "voice_media_state_changed")]
+    VoiceMediaStateChanged {
+        community_id: String,
+        channel_id: String,
+        peer_id: String,
+        media_state: crate::protocol::messages::VoiceMediaState,
+    },
+    #[serde(rename = "voice_sdp_received")]
+    VoiceSdpReceived {
+        community_id: String,
+        channel_id: String,
+        from_peer: String,
+        sdp_type: String,
+        sdp: String,
+    },
+    #[serde(rename = "voice_ice_candidate_received")]
+    VoiceIceCandidateReceived {
+        community_id: String,
+        channel_id: String,
+        from_peer: String,
+        candidate: String,
+        sdp_mid: Option<String>,
+        sdp_mline_index: Option<u32>,
+    },
+    #[serde(rename = "dm_received")]
+    DMReceived(crate::protocol::messages::DirectMessage),
+    #[serde(rename = "dm_typing")]
+    DMTyping { peer_id: String },
 }
 
 // extract the community id from a gossipsub topic string
@@ -128,12 +174,17 @@ fn community_id_from_topic(topic: &str) -> Option<&str> {
         .and_then(|rest| rest.split('/').next())
 }
 
+// voice channel participant tracking type alias for readability
+pub type VoiceChannelMap =
+    Arc<Mutex<HashMap<String, Vec<crate::protocol::messages::VoiceParticipant>>>>;
+
 // start the p2p node on a background task
 pub async fn start(
     keypair: libp2p::identity::Keypair,
     crdt_engine: Arc<Mutex<CrdtEngine>>,
     storage: Arc<crate::storage::DiskStorage>,
     app_handle: tauri::AppHandle,
+    voice_channels: VoiceChannelMap,
 ) -> Result<NodeHandle, String> {
     let mut swarm_instance =
         swarm::build_swarm(&keypair).map_err(|e| format!("failed to build swarm: {}", e))?;
@@ -159,6 +210,9 @@ pub async fn start(
     let relay_peer_id = relay_multiaddr.as_ref().and_then(peer_id_from_multiaddr);
 
     // if a relay is configured, dial it immediately
+    // don't emit RelayStatus here -- the store defaults to connected=true so
+    // no warning shows during the initial handshake. the warning only appears
+    // if the dial actually fails (OutgoingConnectionError) or the connection drops.
     if let Some(ref addr) = relay_multiaddr {
         log::info!("dialing relay at {}", addr);
         if let Err(e) = swarm_instance.dial(addr.clone()) {
@@ -171,6 +225,10 @@ pub async fn start(
 
         // track connected peers for accurate count
         let mut connected_peers: HashSet<String> = HashSet::new();
+
+        // dedup set for dm message ids -- messages arrive on both the pair topic
+        // and inbox topic so we need to skip duplicates
+        let mut seen_dm_ids: HashSet<String> = HashSet::new();
 
         // track whether we have a relay reservation
         let mut relay_reservation_active = false;
@@ -193,6 +251,9 @@ pub async fn start(
 
         // relay reconnection state with exponential backoff
         let mut relay_backoff_secs = RELAY_INITIAL_BACKOFF_SECS;
+        // deferred warning timer -- only notify the frontend after the grace
+        // period expires so transient disconnections don't flash the banner
+        let mut relay_warn_at: Option<tokio::time::Instant> = None;
         // next instant at which we should attempt a relay reconnect
         let mut relay_retry_at: Option<tokio::time::Instant> = if relay_multiaddr.is_some() {
             // schedule initial retry in case the first dial failed synchronously
@@ -304,6 +365,18 @@ pub async fn start(
                                         });
                                     }
                                     crate::protocol::messages::GossipMessage::ProfileAnnounce(profile) => {
+                                        // reject announcements with invalid signatures
+                                        if !verification::verify_announcement(&profile.public_key, &profile) {
+                                            log::warn!("rejected unsigned/invalid profile from {}", profile.peer_id);
+                                            continue;
+                                        }
+
+                                        // reject unverified identities
+                                        if profile.verification_proof.is_none() {
+                                            log::warn!("rejected unverified profile from {}", profile.peer_id);
+                                            continue;
+                                        }
+
                                         // cache the peer profile in our local directory
                                         let entry = DirectoryEntry {
                                             peer_id: profile.peer_id.clone(),
@@ -326,12 +399,145 @@ pub async fn start(
                                         });
                                     }
                                     crate::protocol::messages::GossipMessage::ProfileRevoke(revocation) => {
+                                        // reject revocations with invalid signatures
+                                        if !verification::verify_revocation(&revocation.public_key, &revocation) {
+                                            log::warn!("rejected unsigned revocation for {}", revocation.peer_id);
+                                            continue;
+                                        }
+
                                         // peer is revoking their identity, remove them from our directory
                                         let _ = storage.remove_directory_entry(&revocation.peer_id);
 
                                         let _ = app_handle.emit("dusk-event", DuskEvent::ProfileRevoked {
                                             peer_id: revocation.peer_id,
                                         });
+                                    }
+                                    crate::protocol::messages::GossipMessage::VoiceJoin {
+                                        community_id, channel_id, peer_id, display_name, media_state,
+                                    } => {
+                                        let participant = crate::protocol::messages::VoiceParticipant {
+                                            peer_id: peer_id.clone(),
+                                            display_name: display_name.clone(),
+                                            media_state: media_state.clone(),
+                                        };
+
+                                        // track the participant in shared voice state
+                                        let key = format!("{}:{}", community_id, channel_id);
+                                        let mut vc = voice_channels.lock().await;
+                                        let participants = vc.entry(key).or_insert_with(Vec::new);
+                                        // avoid duplicates if we receive a repeated join
+                                        participants.retain(|p| p.peer_id != peer_id);
+                                        participants.push(participant);
+                                        drop(vc);
+
+                                        let _ = app_handle.emit("dusk-event", DuskEvent::VoiceParticipantJoined {
+                                            community_id, channel_id, peer_id, display_name, media_state,
+                                        });
+                                    }
+                                    crate::protocol::messages::GossipMessage::VoiceLeave {
+                                        community_id, channel_id, peer_id,
+                                    } => {
+                                        let key = format!("{}:{}", community_id, channel_id);
+                                        let mut vc = voice_channels.lock().await;
+                                        if let Some(participants) = vc.get_mut(&key) {
+                                            participants.retain(|p| p.peer_id != peer_id);
+                                            if participants.is_empty() {
+                                                vc.remove(&key);
+                                            }
+                                        }
+                                        drop(vc);
+
+                                        let _ = app_handle.emit("dusk-event", DuskEvent::VoiceParticipantLeft {
+                                            community_id, channel_id, peer_id,
+                                        });
+                                    }
+                                    crate::protocol::messages::GossipMessage::VoiceMediaStateUpdate {
+                                        community_id, channel_id, peer_id, media_state,
+                                    } => {
+                                        // update tracked media state for this participant
+                                        let key = format!("{}:{}", community_id, channel_id);
+                                        let mut vc = voice_channels.lock().await;
+                                        if let Some(participants) = vc.get_mut(&key) {
+                                            if let Some(p) = participants.iter_mut().find(|p| p.peer_id == peer_id) {
+                                                p.media_state = media_state.clone();
+                                            }
+                                        }
+                                        drop(vc);
+
+                                        let _ = app_handle.emit("dusk-event", DuskEvent::VoiceMediaStateChanged {
+                                            community_id, channel_id, peer_id, media_state,
+                                        });
+                                    }
+                                    crate::protocol::messages::GossipMessage::VoiceSdp {
+                                        community_id, channel_id, from_peer, to_peer, sdp_type, sdp,
+                                    } => {
+                                        // only forward sdp messages addressed to us
+                                        let local_id = swarm_instance.local_peer_id().to_string();
+                                        if to_peer == local_id {
+                                            let _ = app_handle.emit("dusk-event", DuskEvent::VoiceSdpReceived {
+                                                community_id, channel_id, from_peer, sdp_type, sdp,
+                                            });
+                                        }
+                                    }
+                                    crate::protocol::messages::GossipMessage::VoiceIceCandidate {
+                                        community_id, channel_id, from_peer, to_peer, candidate, sdp_mid, sdp_mline_index,
+                                    } => {
+                                        // only forward ice candidates addressed to us
+                                        let local_id = swarm_instance.local_peer_id().to_string();
+                                        if to_peer == local_id {
+                                            let _ = app_handle.emit("dusk-event", DuskEvent::VoiceIceCandidateReceived {
+                                                community_id, channel_id, from_peer, candidate, sdp_mid, sdp_mline_index,
+                                            });
+                                        }
+                                    }
+                                    crate::protocol::messages::GossipMessage::DirectMessage(dm_msg) => {
+                                        // only process dms addressed to us (ignore our own echoes)
+                                        let local_id = swarm_instance.local_peer_id().to_string();
+                                        if dm_msg.to_peer == local_id {
+                                            // dedup: messages arrive on both the pair topic and inbox
+                                            // topic so skip if we've already processed this one
+                                            if !seen_dm_ids.insert(dm_msg.id.clone()) {
+                                                continue;
+                                            }
+                                            // cap the dedup set to prevent unbounded memory growth
+                                            if seen_dm_ids.len() > 10000 {
+                                                seen_dm_ids.clear();
+                                            }
+
+                                            // if this arrived on the inbox topic, the sender might be
+                                            // someone we've never dm'd before -- auto-subscribe to the
+                                            // pair topic so subsequent messages use the direct channel
+                                            if topic_str.starts_with("dusk/dm/inbox/") {
+                                                let pair_topic = gossip::topic_for_dm(&dm_msg.from_peer, &dm_msg.to_peer);
+                                                let ident_topic = libp2p::gossipsub::IdentTopic::new(pair_topic);
+                                                let _ = swarm_instance.behaviour_mut().gossipsub.subscribe(&ident_topic);
+                                            }
+
+                                            // persist the incoming message
+                                            let conversation_id = gossip::dm_conversation_id(&dm_msg.from_peer, &dm_msg.to_peer);
+                                            let _ = storage.append_dm_message(&conversation_id, &dm_msg);
+
+                                            // update or create conversation metadata
+                                            let existing = storage.load_dm_conversation(&conversation_id).ok();
+                                            let meta = crate::protocol::messages::DMConversationMeta {
+                                                peer_id: dm_msg.from_peer.clone(),
+                                                display_name: dm_msg.from_display_name.clone(),
+                                                last_message: Some(dm_msg.content.clone()),
+                                                last_message_time: Some(dm_msg.timestamp),
+                                                unread_count: existing.map(|m| m.unread_count + 1).unwrap_or(1),
+                                            };
+                                            let _ = storage.save_dm_conversation(&conversation_id, &meta);
+
+                                            let _ = app_handle.emit("dusk-event", DuskEvent::DMReceived(dm_msg));
+                                        }
+                                    }
+                                    crate::protocol::messages::GossipMessage::DMTyping(indicator) => {
+                                        let local_id = swarm_instance.local_peer_id().to_string();
+                                        if indicator.to_peer == local_id {
+                                            let _ = app_handle.emit("dusk-event", DuskEvent::DMTyping {
+                                                peer_id: indicator.from_peer,
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -388,6 +594,8 @@ pub async fn start(
                         )) => {
                             log::info!("relay reservation accepted by {}", relay_peer_id);
                             relay_reservation_active = true;
+                            relay_warn_at = None;
+                            let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: true });
 
                             // now that we have a relay reservation, process any pending
                             // rendezvous registrations that were queued before the relay was ready
@@ -487,6 +695,13 @@ pub async fn start(
                                 if Some(failed_peer) == relay_peer {
                                     log::warn!("failed to connect to relay: {}", error);
                                     log::info!("scheduling relay reconnect in {}s", relay_backoff_secs);
+                                    // defer the warning so transient failures don't flash the banner
+                                    if relay_warn_at.is_none() {
+                                        relay_warn_at = Some(
+                                            tokio::time::Instant::now()
+                                                + std::time::Duration::from_secs(RELAY_WARN_GRACE_SECS),
+                                        );
+                                    }
                                     relay_retry_at = Some(
                                         tokio::time::Instant::now() + std::time::Duration::from_secs(relay_backoff_secs),
                                     );
@@ -516,8 +731,11 @@ pub async fn start(
                             if Some(peer_id) == relay_peer && !relay_reservation_active {
                                 // reset backoff on successful connection
                                 relay_backoff_secs = RELAY_INITIAL_BACKOFF_SECS;
-                                // cancel any pending retry
+                                // cancel any pending retry and deferred warning
                                 relay_retry_at = None;
+                                relay_warn_at = None;
+                                // clear the banner if it was already showing
+                                let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: true });
 
                                 if let Some(ref addr) = relay_multiaddr {
                                     let relay_circuit_addr = addr.clone()
@@ -543,6 +761,33 @@ pub async fn start(
                         libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, num_established, .. } => {
                             if num_established == 0 {
                                 connected_peers.remove(&peer_id.to_string());
+
+                                // remove disconnected peer from all voice channels and notify frontend
+                                let peer_id_str = peer_id.to_string();
+                                let mut vc = voice_channels.lock().await;
+                                let mut empty_keys = Vec::new();
+                                for (key, participants) in vc.iter_mut() {
+                                    let before_len = participants.len();
+                                    participants.retain(|p| p.peer_id != peer_id_str);
+                                    if participants.len() < before_len {
+                                        // parse the key back into community_id and channel_id
+                                        if let Some((cid, chid)) = key.split_once(':') {
+                                            let _ = app_handle.emit("dusk-event", DuskEvent::VoiceParticipantLeft {
+                                                community_id: cid.to_string(),
+                                                channel_id: chid.to_string(),
+                                                peer_id: peer_id_str.clone(),
+                                            });
+                                        }
+                                    }
+                                    if participants.is_empty() {
+                                        empty_keys.push(key.clone());
+                                    }
+                                }
+                                for key in empty_keys {
+                                    vc.remove(&key);
+                                }
+                                drop(vc);
+
                                 let _ = app_handle.emit("dusk-event", DuskEvent::PeerDisconnected {
                                     peer_id: peer_id.to_string(),
                                 });
@@ -556,6 +801,13 @@ pub async fn start(
                                 if Some(peer_id) == relay_peer {
                                     relay_reservation_active = false;
                                     log::warn!("lost connection to relay, scheduling reconnect in {}s", relay_backoff_secs);
+                                    // defer the warning so quick reconnections don't flash the banner
+                                    if relay_warn_at.is_none() {
+                                        relay_warn_at = Some(
+                                            tokio::time::Instant::now()
+                                                + std::time::Duration::from_secs(RELAY_WARN_GRACE_SECS),
+                                        );
+                                    }
 
                                     relay_retry_at = Some(
                                         tokio::time::Instant::now() + std::time::Duration::from_secs(relay_backoff_secs),
@@ -623,6 +875,18 @@ pub async fn start(
                                     .min(RELAY_MAX_BACKOFF_SECS);
                             }
                         }
+                    }
+                }
+
+                // deferred relay warning -- only tell the frontend after the grace
+                // period so transient disconnections don't flash the banner
+                _ = tokio::time::sleep_until(
+                    relay_warn_at.unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(86400))
+                ), if relay_warn_at.is_some() => {
+                    relay_warn_at = None;
+                    // grace period expired and we still don't have a relay connection
+                    if !relay_reservation_active {
+                        let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: false });
                     }
                 }
 

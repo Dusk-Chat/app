@@ -74,12 +74,18 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
     }
   }
 
-  function handleMessagePeer(peerId: string, displayName: string) {
+  async function handleMessagePeer(peerId: string, displayName: string) {
     // start a dm conversation with this peer
+    try {
+      await tauri.openDMConversation(peerId, displayName);
+    } catch {
+      // fallback for demo mode or if backend call fails
+    }
     addDMConversation({
       peer_id: peerId,
       display_name: displayName,
-      status: "Online",
+      last_message: null,
+      last_message_time: null,
       unread_count: 0,
     });
     setActiveDM(peerId);

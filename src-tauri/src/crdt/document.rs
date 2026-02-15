@@ -1,7 +1,7 @@
 use automerge::{transaction::Transactable, AutoCommit, ObjType, ReadDoc, ROOT};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::protocol::community::{ChannelKind, ChannelMeta, CommunityMeta};
+use crate::protocol::community::{CategoryMeta, ChannelKind, ChannelMeta, CommunityMeta};
 use crate::protocol::messages::ChatMessage;
 
 // initialize a new community document with metadata and a default general channel
@@ -24,15 +24,20 @@ pub fn init_community_doc(
     doc.put(&meta, "created_at", now as i64)?;
 
     let channels = doc.put_object(ROOT, "channels", ObjType::Map)?;
+    let _categories = doc.put_object(ROOT, "categories", ObjType::Map)?;
     let members = doc.put_object(ROOT, "members", ObjType::Map)?;
     let _roles = doc.put_object(ROOT, "roles", ObjType::Map)?;
 
     // create a default general channel
-    let general_id = format!("ch_{}", &hex::encode(&sha2_hash(format!("{}_general", name).as_bytes()))[..12]);
+    let general_id = format!(
+        "ch_{}",
+        &hex::encode(&sha2_hash(format!("{}_general", name).as_bytes()))[..12]
+    );
     let general = doc.put_object(&channels, &general_id, ObjType::Map)?;
     doc.put(&general, "name", "general")?;
     doc.put(&general, "topic", "general discussion")?;
     doc.put(&general, "kind", "text")?;
+    doc.put(&general, "position", 0i64)?;
     let _messages = doc.put_object(&general, "messages", ObjType::List)?;
 
     // add the creator as the first member with owner role
@@ -55,6 +60,23 @@ pub fn add_channel(
         .map(|(_, id)| id)
         .ok_or_else(|| automerge::AutomergeError::InvalidObjId("channels not found".to_string()))?;
 
+    // calculate next position if channel.position is 0
+    let position = if channel.position == 0 {
+        let keys: Vec<String> = doc.keys(&channels).collect();
+        keys.iter()
+            .filter_map(|k| {
+                doc.get(&channels, k)
+                    .ok()
+                    .flatten()
+                    .and_then(|(_, id)| get_i64(doc, &id, "position"))
+            })
+            .max()
+            .map(|p| p + 1)
+            .unwrap_or(0) as u32
+    } else {
+        channel.position
+    };
+
     let ch = doc.put_object(&channels, &channel.id, ObjType::Map)?;
     doc.put(&ch, "name", channel.name.as_str())?;
     doc.put(&ch, "topic", channel.topic.as_str())?;
@@ -66,9 +88,91 @@ pub fn add_channel(
             ChannelKind::Voice => "voice",
         },
     )?;
+    doc.put(&ch, "position", position as i64)?;
+    if let Some(ref cat_id) = channel.category_id {
+        doc.put(&ch, "category_id", cat_id.as_str())?;
+    }
     let _messages = doc.put_object(&ch, "messages", ObjType::List)?;
 
     Ok(())
+}
+
+// add a new category to the community document
+pub fn add_category(
+    doc: &mut AutoCommit,
+    category: &CategoryMeta,
+) -> Result<(), automerge::AutomergeError> {
+    let categories = doc
+        .get(ROOT, "categories")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| {
+            // backwards compat: create categories map if it doesnt exist yet
+            automerge::AutomergeError::InvalidObjId("categories not found".to_string())
+        });
+
+    let categories = match categories {
+        Ok(id) => id,
+        Err(_) => doc.put_object(ROOT, "categories", ObjType::Map)?,
+    };
+
+    // calculate next position if category.position is 0
+    let position = if category.position == 0 {
+        let keys: Vec<String> = doc.keys(&categories).collect();
+        keys.iter()
+            .filter_map(|k| {
+                doc.get(&categories, k)
+                    .ok()
+                    .flatten()
+                    .and_then(|(_, id)| get_i64(doc, &id, "position"))
+            })
+            .max()
+            .map(|p| p + 1)
+            .unwrap_or(0) as u32
+    } else {
+        category.position
+    };
+
+    let cat = doc.put_object(&categories, &category.id, ObjType::Map)?;
+    doc.put(&cat, "name", category.name.as_str())?;
+    doc.put(&cat, "position", position as i64)?;
+
+    Ok(())
+}
+
+// read all categories from the community document
+pub fn get_categories(doc: &AutoCommit, community_id: &str) -> Result<Vec<CategoryMeta>, String> {
+    let categories_obj = doc.get(ROOT, "categories").map_err(|e| e.to_string())?;
+
+    // backwards compat: older docs may not have categories
+    let categories_obj = match categories_obj {
+        Some((_, id)) => id,
+        None => return Ok(Vec::new()),
+    };
+
+    let mut result = Vec::new();
+    let keys = doc.keys(&categories_obj);
+
+    for key in keys {
+        let cat_obj = doc
+            .get(&categories_obj, &key)
+            .map_err(|e| e.to_string())?
+            .map(|(_, id)| id);
+
+        if let Some(cat_id) = cat_obj {
+            let name = get_str(doc, &cat_id, "name").unwrap_or_default();
+            let position = get_i64(doc, &cat_id, "position").unwrap_or(0) as u32;
+
+            result.push(CategoryMeta {
+                id: key.to_string(),
+                community_id: community_id.to_string(),
+                name,
+                position,
+            });
+        }
+    }
+
+    result.sort_by_key(|c| c.position);
+    Ok(result)
 }
 
 // read all channels from the community document
@@ -96,6 +200,8 @@ pub fn get_channels(doc: &AutoCommit, community_id: &str) -> Result<Vec<ChannelM
                 "voice" => ChannelKind::Voice,
                 _ => ChannelKind::Text,
             };
+            let position = get_i64(doc, &ch_id, "position").unwrap_or(0) as u32;
+            let category_id = get_str(doc, &ch_id, "category_id");
 
             result.push(ChannelMeta {
                 id: key.to_string(),
@@ -103,9 +209,14 @@ pub fn get_channels(doc: &AutoCommit, community_id: &str) -> Result<Vec<ChannelM
                 name,
                 topic,
                 kind,
+                position,
+                category_id,
             });
         }
     }
+
+    // sort by position
+    result.sort_by_key(|c| c.position);
 
     Ok(result)
 }
@@ -227,6 +338,33 @@ pub fn get_community_meta(doc: &AutoCommit, community_id: &str) -> Result<Commun
     })
 }
 
+// reorder channels by updating their positions
+pub fn reorder_channels(
+    doc: &mut AutoCommit,
+    community_id: &str,
+    channel_ids: &[String],
+) -> Result<Vec<ChannelMeta>, String> {
+    let channels_obj = doc
+        .get(ROOT, "channels")
+        .map_err(|e| e.to_string())?
+        .map(|(_, id)| id)
+        .ok_or("channels key not found")?;
+
+    // update position for each channel
+    for (index, channel_id) in channel_ids.iter().enumerate() {
+        if let Some((_, ch_obj)) = doc
+            .get(&channels_obj, channel_id)
+            .map_err(|e| e.to_string())?
+        {
+            doc.put(&ch_obj, "position", index as i64)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // return updated channels sorted by position
+    get_channels(doc, community_id)
+}
+
 // -- helpers for reading automerge values --
 
 fn get_str(doc: &AutoCommit, obj: &automerge::ObjId, key: &str) -> Option<String> {
@@ -270,7 +408,7 @@ pub fn get_message_by_id(
         .ok_or("channels key not found")?;
 
     let keys = doc.keys(&channels_obj);
-    
+
     for channel_key in keys {
         let ch_obj = doc
             .get(&channels_obj, &channel_key)
@@ -298,7 +436,8 @@ pub fn get_message_by_id(
                                 id: id.clone(),
                                 channel_id: channel_key.to_string(),
                                 author_id: get_str(doc, &msg_id, "author_id").unwrap_or_default(),
-                                author_name: get_str(doc, &msg_id, "author_name").unwrap_or_default(),
+                                author_name: get_str(doc, &msg_id, "author_name")
+                                    .unwrap_or_default(),
                                 content: get_str(doc, &msg_id, "content").unwrap_or_default(),
                                 timestamp: get_i64(doc, &msg_id, "timestamp").unwrap_or(0) as u64,
                                 edited: get_bool(doc, &msg_id, "edited").unwrap_or(false),
@@ -315,10 +454,7 @@ pub fn get_message_by_id(
 }
 
 // delete a message by id from any channel in the community
-pub fn delete_message_by_id(
-    doc: &mut AutoCommit,
-    message_id: &str,
-) -> Result<(), String> {
+pub fn delete_message_by_id(doc: &mut AutoCommit, message_id: &str) -> Result<(), String> {
     let channels_obj = doc
         .get(ROOT, "channels")
         .map_err(|e| e.to_string())?
@@ -326,7 +462,7 @@ pub fn delete_message_by_id(
         .ok_or("channels key not found")?;
 
     let keys: Vec<String> = doc.keys(&channels_obj).collect();
-    
+
     for channel_key in keys {
         let ch_obj = doc
             .get(&channels_obj, &channel_key)
@@ -350,8 +486,7 @@ pub fn delete_message_by_id(
                     if let Some(msg_obj_id) = msg_obj {
                         let id = get_str(doc, &msg_obj_id, "id").unwrap_or_default();
                         if id == message_id {
-                            doc.delete(&msgs_id, i)
-                                .map_err(|e| e.to_string())?;
+                            doc.delete(&msgs_id, i).map_err(|e| e.to_string())?;
                             return Ok(());
                         }
                     }
@@ -364,9 +499,7 @@ pub fn delete_message_by_id(
 }
 
 // get all members from the community document
-pub fn get_members(
-    doc: &AutoCommit,
-) -> Result<Vec<crate::protocol::community::Member>, String> {
+pub fn get_members(doc: &AutoCommit) -> Result<Vec<crate::protocol::community::Member>, String> {
     let members_obj = doc
         .get(ROOT, "members")
         .map_err(|e| e.to_string())?
@@ -385,7 +518,7 @@ pub fn get_members(
         if let Some(member_id) = member_obj {
             let display_name = get_str(doc, &member_id, "display_name").unwrap_or_default();
             let joined_at = get_i64(doc, &member_id, "joined_at").unwrap_or(0) as u64;
-            
+
             // get roles list
             let roles: Vec<String> = doc
                 .get(&member_id, "roles")
@@ -419,10 +552,7 @@ pub fn get_members(
 }
 
 // remove a member from the community
-pub fn remove_member(
-    doc: &mut AutoCommit,
-    peer_id: &str,
-) -> Result<(), String> {
+pub fn remove_member(doc: &mut AutoCommit, peer_id: &str) -> Result<(), String> {
     let members_obj = doc
         .get(ROOT, "members")
         .map_err(|e| e.to_string())?

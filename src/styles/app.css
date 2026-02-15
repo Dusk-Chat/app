@@ -8,26 +8,26 @@
 
 @theme {
   --color-black: #000000;
-  --color-off-white: #FAFAFA;
-  --color-white: #FFFFFF;
+  --color-off-white: #fafafa;
+  --color-white: #ffffff;
 
-  --color-gray-900: #0A0A0A;
-  --color-gray-800: #1A1A1A;
-  --color-gray-200: #E5E5E5;
-  --color-gray-300: #D4D4D4;
+  --color-gray-900: #0a0a0a;
+  --color-gray-800: #1a1a1a;
+  --color-gray-200: #e5e5e5;
+  --color-gray-300: #d4d4d4;
 
-  --color-orange: #FF4F00;
-  --color-orange-hover: #E64500;
+  --color-orange: #ff4f00;
+  --color-orange-hover: #e64500;
   --color-orange-muted: rgba(255, 79, 0, 0.08);
 
-  --color-success: #00FF00;
-  --color-warning: #FFFF00;
-  --color-error: #FF0000;
+  --color-success: #00ff00;
+  --color-warning: #ffff00;
+  --color-error: #ff0000;
 
   --font-sans: "Space Grotesk", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", monospace;
 
-  --ease-out: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
 
   --animate-fade-in: fade-in 300ms var(--ease-out);
   --animate-slide-in-left: slide-in-left 400ms var(--ease-out);
@@ -35,55 +35,92 @@
   --animate-scale-in: scale-in 300ms var(--ease-out);
   --animate-message-in: message-in 300ms var(--ease-out);
   --animate-pop-in: pop-in 300ms var(--ease-out);
+  --animate-target-pulse: target-pulse 1.5s ease-in-out infinite;
+  --animate-target-shake: target-shake 400ms var(--ease-out);
+  --animate-target-complete: target-complete 300ms var(--ease-out) forwards;
 
   @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   @keyframes slide-in-left {
-    from { opacity: 0; transform: translateX(-20px); }
-    to { opacity: 1; transform: translateX(0); }
+    from {
+      opacity: 0;
+      transform: translateX(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   @keyframes slide-in-right {
-    from { opacity: 0; transform: translateX(20px); }
-    to { opacity: 1; transform: translateX(0); }
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   @keyframes scale-in {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
 
   @keyframes message-in {
-    from { opacity: 0; transform: translateY(20px) scale(0.95); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    from {
+      opacity: 0;
+      transform: translateY(20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes pop-in {
-    0% { transform: scale(0); }
-    70% { transform: scale(1.15); }
-    100% { transform: scale(1); }
+    0% {
+      transform: scale(0);
+    }
+    70% {
+      transform: scale(1.15);
+    }
+    100% {
+      transform: scale(1);
+    }
   }
 }
 
 :root {
   --color-bg-primary: #000000;
-  --color-bg-secondary: #0A0A0A;
-  --color-bg-tertiary: #1A1A1A;
-  --color-text-primary: #FFFFFF;
+  --color-bg-secondary: #0a0a0a;
+  --color-bg-tertiary: #1a1a1a;
+  --color-text-primary: #ffffff;
   --color-text-secondary: rgba(255, 255, 255, 0.6);
   --color-text-tertiary: rgba(255, 255, 255, 0.4);
   --color-text-body: rgba(255, 255, 255, 0.9);
   --color-border-default: rgba(255, 255, 255, 0.2);
   --color-border-subtle: rgba(255, 255, 255, 0.1);
-  --color-accent: #FF4F00;
-  --color-accent-hover: #E64500;
+  --color-accent: #ff4f00;
+  --color-accent-hover: #e64500;
 
-  --transition-fast: 200ms cubic-bezier(0.4, 0.0, 0.2, 1);
-  --transition-base: 300ms cubic-bezier(0.4, 0.0, 0.2, 1);
-  --transition-slow: 400ms cubic-bezier(0.4, 0.0, 0.2, 1);
+  --transition-fast: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -127,8 +164,15 @@ body {
 
 /* typing indicator dot animation */
 @keyframes typing-bounce {
-  0%, 100% { transform: scale(0.8); opacity: 0.5; }
-  50% { transform: scale(1.2); opacity: 1; }
+  0%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
 }
 
 .typing-dot {
@@ -143,8 +187,88 @@ body {
   animation-delay: 300ms;
 }
 
+/* verification target animations */
+@keyframes target-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 79, 0, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(255, 79, 0, 0);
+  }
+}
+
+@keyframes target-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes target-complete {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.8);
+    opacity: 0.3;
+  }
+}
+
 /* pulse animation for unread badges */
 @keyframes badge-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.1); opacity: 0.8; }
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+/* splash screen animations */
+@keyframes splash-pop {
+  0% {
+    transform: scale(0);
+  }
+  70% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes splash-fadeout {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.splash-orange {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: splash-pop 500ms cubic-bezier(0.16, 1, 0.3, 1) 2s both;
+}
+
+.splash-fadeout {
+  animation: splash-fadeout 500ms ease forwards;
 }

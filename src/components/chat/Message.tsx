@@ -6,6 +6,7 @@ import { removeMessage } from "../../stores/messages";
 import { activeCommunityId } from "../../stores/communities";
 import { identity } from "../../stores/identity";
 import Avatar from "../common/Avatar";
+import { openProfileCard } from "../../stores/ui";
 import * as tauri from "../../lib/tauri";
 
 interface MessageProps {
@@ -15,7 +16,10 @@ interface MessageProps {
 }
 
 const Message: Component<MessageProps> = (props) => {
-  const [contextMenu, setContextMenu] = createSignal<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = createSignal<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   const currentUser = () => identity();
   const currentCommunityId = () => activeCommunityId();
@@ -48,6 +52,16 @@ const Message: Component<MessageProps> = (props) => {
     closeContextMenu();
   }
 
+  function handleProfileClick(e: MouseEvent) {
+    e.stopPropagation();
+    openProfileCard({
+      peerId: props.message.author_id,
+      displayName: props.message.author_name,
+      anchorX: e.clientX,
+      anchorY: e.clientY,
+    });
+  }
+
   // close context menu on click outside
   if (typeof window !== "undefined") {
     window.addEventListener("click", closeContextMenu);
@@ -70,17 +84,25 @@ const Message: Component<MessageProps> = (props) => {
           </div>
         }
       >
-        <div class="w-10 shrink-0 pt-0.5">
+        <button
+          type="button"
+          class="w-10 shrink-0 pt-0.5 cursor-pointer"
+          onClick={handleProfileClick}
+        >
           <Avatar name={props.message.author_name} size="md" />
-        </div>
+        </button>
       </Show>
 
       <div class="flex-1 min-w-0">
         <Show when={props.isFirstInGroup}>
           <div class="flex items-baseline gap-2 mb-0.5">
-            <span class="text-[16px] font-medium text-white">
+            <button
+              type="button"
+              class="text-[16px] font-medium text-white hover:text-orange transition-colors duration-200 cursor-pointer"
+              onClick={handleProfileClick}
+            >
               {props.message.author_name}
-            </span>
+            </button>
             <span class="text-[12px] font-mono text-white/50">
               {formatTime(props.message.timestamp)}
             </span>

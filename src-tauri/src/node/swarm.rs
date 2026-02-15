@@ -41,6 +41,8 @@ pub fn build_swarm(
             noise::Config::new,
             yamux::Config::default,
         )?
+        // resolve dns4/dns6 multiaddrs (needed for relay.duskchat.app)
+        .with_dns()?
         // add relay client transport so we can connect through relay circuits
         .with_relay_client(noise::Config::new, yamux::Config::default)?
         .with_behaviour(|key, relay_client| {
@@ -71,10 +73,11 @@ pub fn build_swarm(
                 kademlia,
                 mdns,
                 identify,
-                ping: ping::Behaviour::default(),
+                // ping every 30s to keep the relay connection alive
+                ping: ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(30))),
             }
         })?
-        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
+        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(300)))
         .build();
 
     Ok(swarm)

@@ -5,9 +5,43 @@ use tauri::State;
 use crate::node::gossip;
 use crate::node::NodeCommand;
 use crate::protocol::identity::{DirectoryEntry, DuskIdentity, PublicIdentity};
-use crate::protocol::messages::{GossipMessage, ProfileRevocation};
+use crate::protocol::messages::{GossipMessage, ProfileAnnouncement, ProfileRevocation};
 use crate::storage::UserSettings;
+use crate::verification::{self, ChallengeSubmission};
 use crate::AppState;
+
+// build a signed profile announcement and publish it on the directory topic
+// so all connected peers immediately learn about the updated profile.
+// silently no-ops if the node isn't running yet.
+async fn announce_profile(id: &DuskIdentity, state: &AppState) {
+    let mut announcement = ProfileAnnouncement {
+        peer_id: id.peer_id.to_string(),
+        display_name: id.display_name.clone(),
+        bio: id.bio.clone(),
+        public_key: hex::encode(id.keypair.public().encode_protobuf()),
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+        verification_proof: id.verification_proof.clone(),
+        signature: String::new(),
+    };
+    announcement.signature = verification::sign_announcement(&id.keypair, &announcement);
+
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let msg = GossipMessage::ProfileAnnounce(announcement);
+        if let Ok(data) = serde_json::to_vec(&msg) {
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::SendMessage {
+                    topic: gossip::topic_for_directory(),
+                    data,
+                })
+                .await;
+        }
+    }
+}
 
 #[tauri::command]
 pub async fn has_identity(state: State<'_, AppState>) -> Result<bool, String> {
@@ -37,8 +71,30 @@ pub async fn create_identity(
     state: State<'_, AppState>,
     display_name: String,
     bio: Option<String>,
+    challenge_data: Option<ChallengeSubmission>,
 ) -> Result<PublicIdentity, String> {
-    let new_identity = DuskIdentity::generate(&display_name, &bio.unwrap_or_default());
+    // require challenge data and re-validate behavioral analysis in rust
+    let challenge = challenge_data.ok_or("verification required")?;
+    let result = verification::analyze_challenge(&challenge);
+    if !result.is_human {
+        return Err("verification failed".to_string());
+    }
+
+    let mut new_identity = DuskIdentity::generate(&display_name, &bio.unwrap_or_default());
+
+    // generate a cryptographic proof binding the verification to this keypair
+    let proof = verification::generate_proof(
+        &challenge,
+        &new_identity.keypair,
+        &new_identity.peer_id.to_string(),
+    )?;
+
+    state
+        .storage
+        .save_verification_proof(&proof)
+        .map_err(|e| format!("failed to save verification proof: {}", e))?;
+
+    new_identity.verification_proof = Some(proof);
     new_identity.save(&state.storage)?;
 
     // also save initial settings with this display name so they're in sync
@@ -64,6 +120,8 @@ pub async fn update_display_name(state: State<'_, AppState>, name: String) -> Re
     id.display_name = name;
     id.save(&state.storage)?;
 
+    announce_profile(id, &state).await;
+
     Ok(())
 }
 
@@ -80,7 +138,12 @@ pub async fn update_profile(
     id.bio = bio;
     id.save(&state.storage)?;
 
-    Ok(id.public_identity())
+    let public = id.public_identity();
+
+    // re-announce so connected peers see the change immediately
+    announce_profile(id, &state).await;
+
+    Ok(public)
 }
 
 #[tauri::command]
@@ -98,12 +161,22 @@ pub async fn save_settings(
 ) -> Result<(), String> {
     // also update the identity display name if it changed
     let mut identity = state.identity.lock().await;
+    let mut name_changed = false;
     if let Some(id) = identity.as_mut() {
         if id.display_name != settings.display_name {
             id.display_name = settings.display_name.clone();
             id.save(&state.storage)?;
+            name_changed = true;
         }
     }
+
+    // re-announce if the display name was updated through settings
+    if name_changed {
+        if let Some(id) = identity.as_ref() {
+            announce_profile(id, &state).await;
+        }
+    }
+    drop(identity);
 
     state
         .storage
@@ -192,14 +265,16 @@ pub async fn reset_identity(state: State<'_, AppState>) -> Result<(), String> {
     let id = identity.as_ref().ok_or("no identity loaded")?;
 
     // build the revocation message before we destroy the identity
-    let revocation = ProfileRevocation {
+    let mut revocation = ProfileRevocation {
         peer_id: id.peer_id.to_string(),
         public_key: hex::encode(id.keypair.public().encode_protobuf()),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64,
+        signature: String::new(),
     };
+    revocation.signature = verification::sign_revocation(&id.keypair, &revocation);
 
     // broadcast revocation on the directory gossip topic
     let node_handle = state.node_handle.lock().await;

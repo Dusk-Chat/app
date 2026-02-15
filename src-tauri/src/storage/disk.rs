@@ -6,7 +6,8 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::protocol::community::CommunityMeta;
-use crate::protocol::identity::{DirectoryEntry, ProfileData};
+use crate::protocol::identity::{DirectoryEntry, ProfileData, VerificationProof};
+use crate::protocol::messages::{DMConversationMeta, DirectMessage};
 
 // user settings that persist across sessions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +57,7 @@ impl DiskStorage {
         fs::create_dir_all(base_dir.join("identity"))?;
         fs::create_dir_all(base_dir.join("communities"))?;
         fs::create_dir_all(base_dir.join("directory"))?;
+        fs::create_dir_all(base_dir.join("dms"))?;
 
         Ok(Self { base_dir })
     }
@@ -108,6 +110,25 @@ impl DiskStorage {
     // check if identity exists without loading it
     pub fn has_identity(&self) -> bool {
         self.base_dir.join("identity/keypair.bin").exists()
+    }
+
+    // -- verification proof --
+
+    pub fn save_verification_proof(&self, proof: &VerificationProof) -> Result<(), io::Error> {
+        let json = serde_json::to_string_pretty(proof)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        fs::write(self.base_dir.join("identity/verification.json"), json)
+    }
+
+    pub fn load_verification_proof(&self) -> Result<Option<VerificationProof>, io::Error> {
+        let path = self.base_dir.join("identity/verification.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data = fs::read_to_string(path)?;
+        let proof = serde_json::from_str(&data)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        Ok(Some(proof))
     }
 
     // -- automerge documents --
@@ -225,7 +246,131 @@ impl DiskStorage {
         }
     }
 
-    // wipe all user data - identity, communities, directory, settings
+    // -- direct messages --
+
+    // save a dm conversation's metadata
+    pub fn save_dm_conversation(
+        &self,
+        conversation_id: &str,
+        meta: &DMConversationMeta,
+    ) -> Result<(), io::Error> {
+        let dir = self.base_dir.join(format!("dms/{}", conversation_id));
+        fs::create_dir_all(&dir)?;
+        let json = serde_json::to_string_pretty(meta)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        fs::write(dir.join("meta.json"), json)
+    }
+
+    // load a single dm conversation's metadata
+    pub fn load_dm_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<DMConversationMeta, io::Error> {
+        let path = self
+            .base_dir
+            .join(format!("dms/{}/meta.json", conversation_id));
+        let data = fs::read_to_string(path)?;
+        serde_json::from_str(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    // load all dm conversations
+    pub fn load_all_dm_conversations(
+        &self,
+    ) -> Result<Vec<(String, DMConversationMeta)>, io::Error> {
+        let dms_dir = self.base_dir.join("dms");
+        if !dms_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut conversations = Vec::new();
+        for entry in fs::read_dir(dms_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                if let Some(conv_id) = entry.file_name().to_str() {
+                    let meta_path = entry.path().join("meta.json");
+                    if meta_path.exists() {
+                        if let Ok(data) = fs::read_to_string(&meta_path) {
+                            if let Ok(meta) = serde_json::from_str::<DMConversationMeta>(&data) {
+                                conversations.push((conv_id.to_string(), meta));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(conversations)
+    }
+
+    // remove a dm conversation and all its messages
+    pub fn remove_dm_conversation(&self, conversation_id: &str) -> Result<(), io::Error> {
+        let dir = self.base_dir.join(format!("dms/{}", conversation_id));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        Ok(())
+    }
+
+    // append a message to a dm conversation's message log
+    pub fn append_dm_message(
+        &self,
+        conversation_id: &str,
+        message: &DirectMessage,
+    ) -> Result<(), io::Error> {
+        let dir = self.base_dir.join(format!("dms/{}", conversation_id));
+        fs::create_dir_all(&dir)?;
+
+        let messages_path = dir.join("messages.json");
+        let mut messages: Vec<DirectMessage> = if messages_path.exists() {
+            let data = fs::read_to_string(&messages_path)?;
+            serde_json::from_str(&data).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        messages.push(message.clone());
+
+        let json = serde_json::to_string_pretty(&messages)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        fs::write(&messages_path, json)
+    }
+
+    // load dm messages with optional pagination
+    pub fn load_dm_messages(
+        &self,
+        conversation_id: &str,
+        before: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<DirectMessage>, io::Error> {
+        let messages_path = self
+            .base_dir
+            .join(format!("dms/{}/messages.json", conversation_id));
+        if !messages_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let data = fs::read_to_string(&messages_path)?;
+        let messages: Vec<DirectMessage> = serde_json::from_str(&data)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let filtered: Vec<DirectMessage> = if let Some(before_ts) = before {
+            messages
+                .into_iter()
+                .filter(|m| m.timestamp < before_ts)
+                .collect()
+        } else {
+            messages
+        };
+
+        // return the last `limit` messages (most recent)
+        let start = if filtered.len() > limit {
+            filtered.len() - limit
+        } else {
+            0
+        };
+        Ok(filtered[start..].to_vec())
+    }
+
+    // wipe all user data - identity, communities, directory, dms, settings
     // used when resetting identity to leave no traces on this client
     pub fn wipe_all_data(&self) -> Result<(), io::Error> {
         let identity_dir = self.base_dir.join("identity");
@@ -243,10 +388,16 @@ impl DiskStorage {
             fs::remove_dir_all(&directory_dir)?;
         }
 
+        let dms_dir = self.base_dir.join("dms");
+        if dms_dir.exists() {
+            fs::remove_dir_all(&dms_dir)?;
+        }
+
         // recreate the directory tree so the app can still function
         fs::create_dir_all(self.base_dir.join("identity"))?;
         fs::create_dir_all(self.base_dir.join("communities"))?;
         fs::create_dir_all(self.base_dir.join("directory"))?;
+        fs::create_dir_all(self.base_dir.join("dms"))?;
 
         Ok(())
     }

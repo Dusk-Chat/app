@@ -4,6 +4,7 @@ import UserFooter from "./UserFooter";
 interface SidebarLayoutProps {
   header?: JSX.Element;
   footer?: JSX.Element;
+  beforeFooter?: JSX.Element;
   showFooter?: boolean;
   showFooterSettings?: boolean;
   onFooterSettingsClick?: () => void;
@@ -23,6 +24,9 @@ const SidebarLayout: Component<ParentProps<SidebarLayoutProps>> = (props) => {
       <div class="flex-1 overflow-y-auto">
         {props.children}
       </div>
+
+      {/* voice controls or other content above the user footer */}
+      {props.beforeFooter}
 
       {/* footer */}
       {props.showFooter && (

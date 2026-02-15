@@ -1,10 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::State;
+use tokio::net::TcpStream;
+use tokio::time::{timeout, Duration};
 
 use crate::node::gossip;
 use crate::node::{self, NodeCommand};
 use crate::protocol::messages::{ChatMessage, GossipMessage, ProfileAnnouncement, TypingIndicator};
+use crate::verification;
 use crate::AppState;
 
 #[tauri::command]
@@ -19,11 +22,12 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
         state.crdt_engine.clone(),
         state.storage.clone(),
         app,
+        state.voice_channels.clone(),
     )
     .await?;
 
     // capture profile info for announcement before dropping identity lock
-    let profile_announcement = ProfileAnnouncement {
+    let mut profile_announcement = ProfileAnnouncement {
         peer_id: id.peer_id.to_string(),
         display_name: id.display_name.clone(),
         bio: id.bio.clone(),
@@ -32,7 +36,11 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64,
+        verification_proof: id.verification_proof.clone(),
+        signature: String::new(),
     };
+    profile_announcement.signature =
+        verification::sign_announcement(&id.keypair, &profile_announcement);
     drop(identity);
 
     {
@@ -114,6 +122,41 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
                 .send(NodeCommand::RegisterRendezvous { namespace })
                 .await;
         }
+
+        // subscribe to all existing dm conversation topics
+        let local_peer_str = {
+            let identity = state.identity.lock().await;
+            identity
+                .as_ref()
+                .map(|i| i.peer_id.to_string())
+                .unwrap_or_default()
+        };
+        if let Ok(conversations) = state.storage.load_all_dm_conversations() {
+            for (_, meta) in &conversations {
+                let dm_topic = gossip::topic_for_dm(&local_peer_str, &meta.peer_id);
+                let _ = handle
+                    .command_tx
+                    .send(NodeCommand::Subscribe { topic: dm_topic })
+                    .await;
+            }
+        }
+
+        // subscribe to personal dm inbox so first-time dms from any peer land
+        let inbox_topic = gossip::topic_for_dm_inbox(&local_peer_str);
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::Subscribe { topic: inbox_topic })
+            .await;
+
+        // register personal rendezvous namespace so any peer can discover
+        // and connect to us for dms even without sharing a community
+        let personal_ns = format!("dusk/peer/{}", local_peer_str);
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::RegisterRendezvous {
+                namespace: personal_ns,
+            })
+            .await;
     }
 
     Ok(())
@@ -241,4 +284,29 @@ fn find_community_for_channel(
         "no community found containing channel {}",
         channel_id
     ))
+}
+
+// attempts tcp connections to well-known hosts to distinguish
+// between a general internet outage and the relay being unreachable
+#[tauri::command]
+pub async fn check_internet_connectivity() -> Result<bool, String> {
+    let hosts = vec![
+        ("www.apple.com", 80),
+        ("www.google.com", 80),
+        ("www.yahoo.com", 80),
+    ];
+
+    let connect_timeout = Duration::from_secs(5);
+
+    let futures: Vec<_> = hosts
+        .into_iter()
+        .map(|(host, port)| {
+            let addr = format!("{}:{}", host, port);
+            timeout(connect_timeout, TcpStream::connect(addr))
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    Ok(results.iter().any(|r| matches!(r, Ok(Ok(_)))))
 }

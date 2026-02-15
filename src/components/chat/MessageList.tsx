@@ -35,7 +35,7 @@ const MessageList: Component<MessageListProps> = (props) => {
 
   // auto-scroll when new messages arrive if user is at the bottom
   createEffect(() => {
-    const _ = props.messages.length;
+    void props.messages.length;
     if (isAtBottom()) {
       // defer to allow dom update
       requestAnimationFrame(() => scrollToBottom(true));

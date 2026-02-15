@@ -12,12 +12,14 @@ interface ChatAreaProps {
   onTyping: () => void;
 }
 
+// voice channels are joined inline from the sidebar and no longer
+// render a full-screen view here -- the chat area always shows
+// the selected text channel
 const ChatArea: Component<ChatAreaProps> = (props) => {
   const channel = () => activeChannel();
 
   return (
     <div class="flex-1 flex flex-col min-w-0 bg-black">
-      {/* message area */}
       <Show
         when={channel()}
         fallback={

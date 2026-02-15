@@ -32,3 +32,42 @@ pub fn topic_for_directory() -> String {
 pub fn topic_for_sync() -> String {
     "dusk/sync".to_string()
 }
+
+// voice signaling topic for webrtc sdp/ice exchange and presence
+pub fn topic_for_voice(community_id: &str, channel_id: &str) -> String {
+    format!(
+        "dusk/community/{}/channel/{}/voice",
+        community_id, channel_id
+    )
+}
+
+// personal inbox topic for receiving first-time dms from peers we haven't
+// subscribed to yet. every peer subscribes to their own inbox on startup.
+pub fn topic_for_dm_inbox(peer_id: &str) -> String {
+    format!("dusk/dm/inbox/{}", peer_id)
+}
+
+// dm topic between two peers, sorted alphabetically so both peers derive the same topic
+pub fn topic_for_dm(peer_a: &str, peer_b: &str) -> String {
+    let (first, second) = if peer_a < peer_b {
+        (peer_a, peer_b)
+    } else {
+        (peer_b, peer_a)
+    };
+    format!("dusk/dm/{}/{}", first, second)
+}
+
+// derive a stable conversation id from two peer ids
+pub fn dm_conversation_id(peer_a: &str, peer_b: &str) -> String {
+    let (first, second) = if peer_a < peer_b {
+        (peer_a, peer_b)
+    } else {
+        (peer_b, peer_a)
+    };
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    first.hash(&mut hasher);
+    second.hash(&mut hasher);
+    format!("dm_{:016x}", hasher.finish())
+}

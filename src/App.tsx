@@ -1,4 +1,13 @@
-import { Component, onMount, onCleanup, createSignal, Show } from "solid-js";
+import {
+  Component,
+  onMount,
+  onCleanup,
+  createSignal,
+  createEffect,
+  on,
+  Show,
+  For,
+} from "solid-js";
 import AppLayout from "./components/layout/AppLayout";
 import OverlayMenu from "./components/navigation/OverlayMenu";
 import MobileNav from "./components/navigation/MobileNav";
@@ -6,7 +15,10 @@ import Modal from "./components/common/Modal";
 import Button from "./components/common/Button";
 import SettingsModal from "./components/settings/SettingsModal";
 import SignUpScreen from "./components/auth/SignUpScreen";
+import SplashScreen from "./components/auth/SplashScreen";
 import UserDirectoryModal from "./components/directory/UserDirectoryModal";
+import ProfileCard from "./components/common/ProfileCard";
+import ProfileModal from "./components/common/ProfileModal";
 
 import {
   overlayMenuOpen,
@@ -28,6 +40,9 @@ import {
   setChannels,
   setActiveChannel,
   activeChannelId,
+  setCategories,
+  addCategory,
+  categories,
 } from "./stores/channels";
 import {
   addMessage,
@@ -46,6 +61,8 @@ import {
   setPeerCount,
   setNodeStatus,
   setIsConnected,
+  setRelayConnected,
+  relayConnected,
 } from "./stores/connection";
 import {
   setDMConversations,
@@ -53,6 +70,12 @@ import {
   addDMMessage,
   setActiveDM,
   updateDMLastMessage,
+  handleIncomingDM,
+  addDMTypingPeer,
+  clearDMTypingPeers,
+  clearDMMessages,
+  setDMMessages,
+  updateDMPeerDisplayName,
 } from "./stores/dms";
 import {
   setKnownPeers,
@@ -61,9 +84,21 @@ import {
   removePeer,
   clearDirectory,
 } from "./stores/directory";
+import {
+  handleVoiceParticipantJoined,
+  handleVoiceParticipantLeft,
+  handleVoiceMediaStateChanged,
+  handleVoiceSdpReceived,
+  handleVoiceIceCandidateReceived,
+} from "./stores/voice";
 
 import * as tauri from "./lib/tauri";
-import type { DuskEvent } from "./lib/types";
+import type {
+  DuskEvent,
+  ChallengeExport,
+  ChannelMeta,
+  DirectMessage,
+} from "./lib/types";
 import { resetSettings } from "./stores/settings";
 
 const App: Component = () => {
@@ -73,11 +108,101 @@ const App: Component = () => {
   const [tauriAvailable, setTauriAvailable] = createSignal(false);
   const [needsSignUp, setNeedsSignUp] = createSignal(false);
   const [appReady, setAppReady] = createSignal(false);
+  const [showSplash, setShowSplash] = createSignal(true);
   const [newCommunityName, setNewCommunityName] = createSignal("");
   const [newCommunityDesc, setNewCommunityDesc] = createSignal("");
   const [joinInviteCode, setJoinInviteCode] = createSignal("");
   const [newChannelName, setNewChannelName] = createSignal("");
   const [newChannelTopic, setNewChannelTopic] = createSignal("");
+  const [newChannelKind, setNewChannelKind] = createSignal<"Text" | "Voice">(
+    "Text",
+  );
+  const [newChannelCategoryId, setNewChannelCategoryId] = createSignal<
+    string | null
+  >(null);
+  const [newCategoryName, setNewCategoryName] = createSignal("");
+
+  // react to community switches by loading channels, members, and selecting first channel
+  createEffect(
+    on(activeCommunityId, async (communityId, prev) => {
+      if (communityId === prev) return;
+      if (!communityId) {
+        setChannels([]);
+        setCategories([]);
+        setActiveChannel(null);
+        clearMessages();
+        setMembers([]);
+        return;
+      }
+
+      if (tauriAvailable()) {
+        try {
+          const [chs, cats] = await Promise.all([
+            tauri.getChannels(communityId),
+            tauri.getCategories(communityId),
+          ]);
+          setChannels(chs);
+          setCategories(cats);
+
+          if (chs.length > 0) {
+            setActiveChannel(chs[0].id);
+          } else {
+            setActiveChannel(null);
+            clearMessages();
+          }
+
+          const mems = await tauri.getMembers(communityId);
+          setMembers(mems);
+        } catch (e) {
+          console.error("failed to load community data:", e);
+        }
+      }
+    }),
+  );
+
+  // react to channel switches by loading messages for the new channel
+  createEffect(
+    on(activeChannelId, async (channelId, prev) => {
+      if (channelId === prev) return;
+      if (!channelId) {
+        clearMessages();
+        return;
+      }
+
+      if (tauriAvailable()) {
+        try {
+          clearMessages();
+          const msgs = await tauri.getMessages(channelId);
+          setMessages(msgs);
+        } catch (e) {
+          console.error("failed to load messages:", e);
+        }
+      }
+    }),
+  );
+
+  // react to dm switches by loading messages for the selected peer
+  createEffect(
+    on(activeDMPeerId, async (peerId, prev) => {
+      if (peerId === prev) return;
+      clearDMTypingPeers();
+
+      if (!peerId) {
+        clearDMMessages();
+        return;
+      }
+
+      if (tauriAvailable()) {
+        try {
+          clearDMMessages();
+          const msgs = await tauri.getDMMessages(peerId);
+          setDMMessages(msgs);
+        } catch (e) {
+          console.error("failed to load dm messages:", e);
+        }
+      }
+    }),
+  );
 
   onMount(async () => {
     cleanupResize = initResponsive();
@@ -142,6 +267,14 @@ const App: Component = () => {
         // directory not populated yet, that's fine
       }
 
+      // load existing dm conversations from disk
+      try {
+        const convos = await tauri.getDMConversations();
+        setDMConversations(convos);
+      } catch {
+        // no dm history yet, that's fine
+      }
+
       const communities = await tauri.getCommunities();
       setCommunities(communities);
 
@@ -157,19 +290,10 @@ const App: Component = () => {
       // from the backend will set the accurate state once peers are found.
       setNodeStatus("running");
 
+      // the createEffect on activeCommunityId handles loading channels,
+      // messages, and members reactively when this is set
       if (communities.length > 0) {
         setActiveCommunity(communities[0].id);
-        const channels = await tauri.getChannels(communities[0].id);
-        setChannels(channels);
-
-        if (channels.length > 0) {
-          setActiveChannel(channels[0].id);
-          const messages = await tauri.getMessages(channels[0].id);
-          setMessages(messages);
-        }
-
-        const members = await tauri.getMembers(communities[0].id);
-        setMembers(members);
       }
     } catch (e) {
       console.error("initialization error:", e);
@@ -219,10 +343,42 @@ const App: Component = () => {
           event.payload.display_name,
           event.payload.bio,
         );
+        // keep dm conversation names in sync
+        updateDMPeerDisplayName(
+          event.payload.peer_id,
+          event.payload.display_name,
+        );
         break;
       case "profile_revoked":
         // peer revoked their identity, remove them from our local directory
         removePeer(event.payload.peer_id);
+        break;
+      case "relay_status":
+        setRelayConnected(event.payload.connected);
+        break;
+      case "dm_received":
+        handleIncomingDM(event.payload);
+        break;
+      case "dm_typing":
+        // only show typing if the sender is the active dm peer
+        if (event.payload.peer_id === activeDMPeerId()) {
+          addDMTypingPeer(event.payload.peer_id);
+        }
+        break;
+      case "voice_participant_joined":
+        handleVoiceParticipantJoined(event.payload);
+        break;
+      case "voice_participant_left":
+        handleVoiceParticipantLeft(event.payload);
+        break;
+      case "voice_media_state_changed":
+        handleVoiceMediaStateChanged(event.payload);
+        break;
+      case "voice_sdp_received":
+        handleVoiceSdpReceived(event.payload);
+        break;
+      case "voice_ice_candidate_received":
+        handleVoiceIceCandidateReceived(event.payload);
         break;
     }
   }
@@ -269,23 +425,38 @@ const App: Component = () => {
     tauri.sendTypingIndicator(channelId).catch(() => {});
   }
 
-  function handleSendDM(content: string) {
+  async function handleSendDM(content: string) {
     const peerId = activeDMPeerId();
     if (!peerId) return;
 
-    const id = identity();
-    const msg = {
-      id: `dm_${Date.now()}`,
-      channel_id: `dm_${peerId}`,
-      author_id: id?.peer_id ?? "local",
-      author_name: id?.display_name ?? "you",
-      content,
-      timestamp: Date.now(),
-      edited: false,
-    };
+    if (tauriAvailable()) {
+      try {
+        const msg = await tauri.sendDM(peerId, content);
+        addDMMessage(msg);
+        updateDMLastMessage(peerId, content, msg.timestamp);
+      } catch (e) {
+        console.error("failed to send dm:", e);
+      }
+    } else {
+      // demo mode fallback
+      const id = identity();
+      const msg: DirectMessage = {
+        id: `dm_${Date.now()}`,
+        from_peer: id?.peer_id ?? "local",
+        to_peer: peerId,
+        from_display_name: id?.display_name ?? "you",
+        content,
+        timestamp: Date.now(),
+      };
+      addDMMessage(msg);
+      updateDMLastMessage(peerId, content, msg.timestamp);
+    }
+  }
 
-    addDMMessage(msg);
-    updateDMLastMessage(peerId, content, msg.timestamp);
+  function handleDMTyping() {
+    const peerId = activeDMPeerId();
+    if (!peerId || !tauriAvailable()) return;
+    tauri.sendDMTyping(peerId).catch(() => {});
   }
 
   function handleOverlayNavigate(action: string) {
@@ -318,17 +489,8 @@ const App: Component = () => {
       try {
         const community = await tauri.createCommunity(name, desc);
         addCommunity(community);
+        // the createEffect on activeCommunityId handles loading channels, messages, members
         setActiveCommunity(community.id);
-
-        const channels = await tauri.getChannels(community.id);
-        setChannels(channels);
-        if (channels.length > 0) {
-          setActiveChannel(channels[0].id);
-          clearMessages();
-        }
-
-        const members = await tauri.getMembers(community.id);
-        setMembers(members);
       } catch (e) {
         console.error("failed to create community:", e);
       }
@@ -350,6 +512,8 @@ const App: Component = () => {
           name: "general",
           topic: "general discussion",
           kind: "Text",
+          position: 0,
+          category_id: null,
         },
       ]);
       setActiveChannel(chId);
@@ -379,17 +543,8 @@ const App: Component = () => {
       try {
         const community = await tauri.joinCommunity(inviteCode);
         addCommunity(community);
+        // the createEffect on activeCommunityId handles loading channels, messages, members
         setActiveCommunity(community.id);
-
-        const channels = await tauri.getChannels(community.id);
-        setChannels(channels);
-        if (channels.length > 0) {
-          setActiveChannel(channels[0].id);
-          clearMessages();
-        }
-
-        const members = await tauri.getMembers(community.id);
-        setMembers(members);
       } catch (e) {
         console.error("failed to join community:", e);
       }
@@ -412,6 +567,8 @@ const App: Component = () => {
           name: "general",
           topic: "general discussion",
           kind: "Text",
+          position: 0,
+          category_id: null,
         },
       ]);
       setActiveChannel(chId);
@@ -435,35 +592,78 @@ const App: Component = () => {
   async function handleCreateChannel() {
     const name = newChannelName().trim();
     const topic = newChannelTopic().trim();
+    const kind = newChannelKind();
+    const categoryId = newChannelCategoryId();
     const communityId = activeCommunityId();
     if (!name || !communityId) return;
 
     if (tauriAvailable()) {
       try {
-        const channel = await tauri.createChannel(communityId, name, topic);
+        const channel = await tauri.createChannel(
+          communityId,
+          name,
+          topic,
+          kind.toLowerCase(),
+          categoryId,
+        );
         setChannels((prev) => [...prev, channel]);
-        setActiveChannel(channel.id);
-        clearMessages();
+        // only auto-select text channels after creation
+        if (channel.kind === "Text") {
+          setActiveChannel(channel.id);
+        }
       } catch (e) {
         console.error("failed to create channel:", e);
       }
     } else {
       // demo mode
       const chId = `ch_${name.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
-      const channel = {
+      const channel: ChannelMeta = {
         id: chId,
         community_id: communityId,
         name,
         topic: topic || `${name} discussion`,
-        kind: "Text" as const,
+        kind,
+        position: 0,
+        category_id: categoryId,
       };
       setChannels((prev) => [...prev, channel]);
-      setActiveChannel(chId);
-      clearMessages();
+      if (kind === "Text") {
+        setActiveChannel(chId);
+        clearMessages();
+      }
     }
 
     setNewChannelName("");
     setNewChannelTopic("");
+    setNewChannelKind("Text");
+    setNewChannelCategoryId(null);
+    closeModal();
+  }
+
+  async function handleCreateCategory() {
+    const name = newCategoryName().trim();
+    const communityId = activeCommunityId();
+    if (!name || !communityId) return;
+
+    if (tauriAvailable()) {
+      try {
+        const category = await tauri.createCategory(communityId, name);
+        addCategory(category);
+      } catch (e) {
+        console.error("failed to create category:", e);
+      }
+    } else {
+      // demo mode
+      const catId = `cat_${name.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
+      addCategory({
+        id: catId,
+        community_id: communityId,
+        name,
+        position: 0,
+      });
+    }
+
+    setNewCategoryName("");
     closeModal();
   }
 
@@ -487,10 +687,18 @@ const App: Component = () => {
     closeModal();
   }
 
-  async function handleSignUpComplete(displayName: string, bio: string) {
+  async function handleSignUpComplete(
+    displayName: string,
+    bio: string,
+    challengeData?: ChallengeExport,
+  ) {
     if (tauriAvailable()) {
       try {
-        const created = await tauri.createIdentity(displayName, bio);
+        const created = await tauri.createIdentity(
+          displayName,
+          bio,
+          challengeData,
+        );
         setCurrentIdentity(created);
         updateSettings({ display_name: displayName });
 
@@ -532,13 +740,16 @@ const App: Component = () => {
     setCommunities([]);
     setActiveCommunity(null);
     setChannels([]);
+    setCategories([]);
     setActiveChannel(null);
     clearMessages();
     setMembers([]);
     setDMConversations([]);
     setActiveDM(null);
+    clearDMTypingPeers();
     setPeerCount(0);
     setIsConnected(false);
+    setRelayConnected(true);
     setNodeStatus("stopped");
     localStorage.removeItem("dusk_user_settings");
 
@@ -553,6 +764,14 @@ const App: Component = () => {
 
   return (
     <div class="h-screen w-screen overflow-hidden bg-black">
+      <Show when={showSplash()}>
+        <SplashScreen
+          onComplete={() => setShowSplash(false)}
+          identity={identity()}
+          relayConnected={relayConnected()}
+        />
+      </Show>
+
       <Show when={needsSignUp()}>
         <SignUpScreen onComplete={handleSignUpComplete} />
       </Show>
@@ -563,7 +782,11 @@ const App: Component = () => {
           onSendMessage={handleSendMessage}
           onTyping={handleTyping}
           onSendDM={handleSendDM}
+          onDMTyping={handleDMTyping}
         />
+
+        <ProfileCard />
+        <ProfileModal />
 
         <OverlayMenu
           isOpen={overlayMenuOpen()}
@@ -647,6 +870,37 @@ const App: Component = () => {
           title="create channel"
         >
           <div class="flex flex-col gap-4">
+            {/* channel type selector */}
+            <div>
+              <label class="block text-[12px] font-mono font-medium uppercase tracking-[0.05em] text-white/60 mb-2">
+                type
+              </label>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  class={`flex-1 px-4 py-3 text-[16px] border-2 transition-colors duration-200 cursor-pointer ${
+                    newChannelKind() === "Text"
+                      ? "border-orange bg-orange/10 text-white"
+                      : "border-white/20 bg-black text-white/60 hover:border-white/40"
+                  }`}
+                  onClick={() => setNewChannelKind("Text")}
+                >
+                  text
+                </button>
+                <button
+                  type="button"
+                  class={`flex-1 px-4 py-3 text-[16px] border-2 transition-colors duration-200 cursor-pointer ${
+                    newChannelKind() === "Voice"
+                      ? "border-orange bg-orange/10 text-white"
+                      : "border-white/20 bg-black text-white/60 hover:border-white/40"
+                  }`}
+                  onClick={() => setNewChannelKind("Voice")}
+                >
+                  voice
+                </button>
+              </div>
+            </div>
+
             <div>
               <label class="block text-[12px] font-mono font-medium uppercase tracking-[0.05em] text-white/60 mb-2">
                 name
@@ -671,11 +925,62 @@ const App: Component = () => {
                 onInput={(e) => setNewChannelTopic(e.currentTarget.value)}
               />
             </div>
+
+            {/* category selector */}
+            <Show when={categories().length > 0}>
+              <div>
+                <label class="block text-[12px] font-mono font-medium uppercase tracking-[0.05em] text-white/60 mb-2">
+                  category (optional)
+                </label>
+                <select
+                  class="w-full bg-black border-2 border-white/20 text-white text-[16px] px-4 py-3 outline-none focus:border-orange transition-colors duration-200 cursor-pointer"
+                  value={newChannelCategoryId() ?? ""}
+                  onChange={(e) =>
+                    setNewChannelCategoryId(e.currentTarget.value || null)
+                  }
+                >
+                  <option value="">no category</option>
+                  <For each={categories()}>
+                    {(cat) => <option value={cat.id}>{cat.name}</option>}
+                  </For>
+                </select>
+              </div>
+            </Show>
+
             <Button
               variant="primary"
               fullWidth
               onClick={handleCreateChannel}
               disabled={!newChannelName().trim()}
+            >
+              create
+            </Button>
+          </div>
+        </Modal>
+
+        <Modal
+          isOpen={activeModal() === "create-category"}
+          onClose={closeModal}
+          title="create category"
+        >
+          <div class="flex flex-col gap-4">
+            <div>
+              <label class="block text-[12px] font-mono font-medium uppercase tracking-[0.05em] text-white/60 mb-2">
+                name
+              </label>
+              <input
+                type="text"
+                class="w-full bg-black border-2 border-white/20 text-white text-[16px] px-4 py-3 outline-none placeholder:text-white/30 focus:border-orange transition-colors duration-200"
+                placeholder="category name"
+                value={newCategoryName()}
+                onInput={(e) => setNewCategoryName(e.currentTarget.value)}
+              />
+            </div>
+            <Button
+              variant="primary"
+              fullWidth
+              onClick={handleCreateCategory}
+              disabled={!newCategoryName().trim()}
             >
               create
             </Button>
@@ -736,6 +1041,8 @@ function loadDemoData() {
       name: "general",
       topic: "general discussion about dusk development",
       kind: "Text",
+      position: 0,
+      category_id: null,
     },
     {
       id: "ch_design_001",
@@ -743,6 +1050,8 @@ function loadDemoData() {
       name: "design",
       topic: "UI/UX design discussion",
       kind: "Text",
+      position: 1,
+      category_id: null,
     },
     {
       id: "ch_voice_001",
@@ -750,6 +1059,8 @@ function loadDemoData() {
       name: "voice",
       topic: "",
       kind: "Voice",
+      position: 0,
+      category_id: null,
     },
   ]);
 
@@ -885,7 +1196,6 @@ function loadDemoData() {
     {
       peer_id: "12D3KooWPeer_alice",
       display_name: "alice",
-      status: "Online",
       last_message: "the gossipsub refactor is merged, check it out",
       last_message_time: now - 600000,
       unread_count: 2,
@@ -893,7 +1203,6 @@ function loadDemoData() {
     {
       peer_id: "12D3KooWPeer_bob",
       display_name: "bob",
-      status: "Idle",
       last_message: "sure, i'll review the PR tonight",
       last_message_time: now - 3600000,
       unread_count: 0,
@@ -901,7 +1210,6 @@ function loadDemoData() {
     {
       peer_id: "12D3KooWPeer_charlie",
       display_name: "charlie",
-      status: "Online",
       last_message: "NAT traversal test results look promising",
       last_message_time: now - 7200000,
       unread_count: 1,
@@ -909,7 +1217,6 @@ function loadDemoData() {
     {
       peer_id: "12D3KooWPeer_diana",
       display_name: "diana",
-      status: "Offline",
       last_message: "offline, will catch up tomorrow",
       last_message_time: now - 86400000,
       unread_count: 0,

@@ -29,6 +29,7 @@ libp2p = { version = "0.54", features = [
   "noise",
   "yamux",
   "tcp",
+  "dns",
   "tokio",
   "identify",
   "macros",
@@ -56,3 +57,7 @@ dotenvy = "0.15"
 
 # async utilities
 futures = "0.3"
+
+# platform-specific: webview media permissions on linux
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"

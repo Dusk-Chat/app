@@ -1,17 +1,56 @@
 import type { Component } from "solid-js";
-import { Show } from "solid-js";
+import { Show, createMemo } from "solid-js";
 import { AtSign } from "lucide-solid";
-import { activeDMConversation, dmMessages } from "../../stores/dms";
+import {
+  activeDMConversation,
+  dmMessages,
+  dmTypingPeers,
+} from "../../stores/dms";
+import { onlinePeerIds } from "../../stores/members";
 import MessageList from "../chat/MessageList";
 import MessageInput from "../chat/MessageInput";
+import TypingIndicator from "../chat/TypingIndicator";
 import Avatar from "../common/Avatar";
+import type { ChatMessage } from "../../lib/types";
 
 interface DMChatAreaProps {
   onSendDM: (content: string) => void;
+  onTyping: () => void;
 }
 
 const DMChatArea: Component<DMChatAreaProps> = (props) => {
   const dm = () => activeDMConversation();
+
+  // adapt DirectMessage[] to ChatMessage[] so the existing MessageList works
+  const adaptedMessages = createMemo((): ChatMessage[] =>
+    dmMessages().map((m) => ({
+      id: m.id,
+      channel_id: `dm_${m.from_peer === dm()?.peer_id ? m.from_peer : m.to_peer}`,
+      author_id: m.from_peer,
+      author_name: m.from_display_name,
+      content: m.content,
+      timestamp: m.timestamp,
+      edited: false,
+    })),
+  );
+
+  // derive peer online status from the members store or directory
+  const peerStatus = createMemo(() => {
+    const peerId = dm()?.peer_id;
+    if (!peerId) return "offline";
+    if (onlinePeerIds().has(peerId)) return "online";
+    return "offline";
+  });
+
+  // typing indicator names
+  const typingNames = createMemo(() => {
+    const typing = dmTypingPeers();
+    if (typing.length === 0) return [];
+    const peer = dm();
+    if (!peer) return [];
+    // for dms there's only ever one person who can be typing
+    return typing.includes(peer.peer_id) ? [peer.display_name] : [];
+  });
 
   return (
     <div class="flex-1 flex flex-col min-w-0 bg-black">
@@ -26,14 +65,10 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
               </span>
               <span
                 class={`text-[12px] font-mono ml-1 ${
-                  dm()!.status === "Online"
-                    ? "text-success"
-                    : dm()!.status === "Idle"
-                      ? "text-warning"
-                      : "text-white/30"
+                  peerStatus() === "online" ? "text-success" : "text-white/30"
                 }`}
               >
-                {dm()!.status.toLowerCase()}
+                {peerStatus()}
               </span>
             </Show>
           </div>
@@ -42,7 +77,7 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
 
       {/* conversation history */}
       <Show
-        when={dmMessages().length > 0}
+        when={adaptedMessages().length > 0}
         fallback={
           <div class="flex-1 flex flex-col items-center justify-center">
             <Show when={dm()}>
@@ -58,7 +93,12 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
           </div>
         }
       >
-        <MessageList messages={dmMessages()} />
+        <MessageList messages={adaptedMessages()} />
+      </Show>
+
+      {/* typing indicator */}
+      <Show when={typingNames().length > 0}>
+        <TypingIndicator typingUsers={typingNames()} />
       </Show>
 
       {/* message input */}
@@ -66,7 +106,7 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
         <MessageInput
           channelName={dm()!.display_name}
           onSend={props.onSendDM}
-          onTyping={() => {}}
+          onTyping={props.onTyping}
         />
       </Show>
     </div>

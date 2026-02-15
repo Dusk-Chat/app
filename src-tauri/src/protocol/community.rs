@@ -9,6 +9,15 @@ pub struct CommunityMeta {
     pub created_at: u64,
 }
 
+// user-defined grouping for channels within a community
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryMeta {
+    pub id: String,
+    pub community_id: String,
+    pub name: String,
+    pub position: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelMeta {
     pub id: String,
@@ -16,6 +25,9 @@ pub struct ChannelMeta {
     pub name: String,
     pub topic: String,
     pub kind: ChannelKind,
+    pub position: u32,
+    // channels without a category sit at the top level
+    pub category_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

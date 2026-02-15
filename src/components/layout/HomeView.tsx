@@ -2,15 +2,16 @@ import type { Component } from "solid-js";
 import { For, Show, createSignal, createMemo } from "solid-js";
 import { Users, MessageCircle, Search, UserPlus } from "lucide-solid";
 import {
-  dmConversations,
   setActiveDM,
   clearDMUnread,
   addDMConversation,
 } from "../../stores/dms";
 import { knownPeers, friends } from "../../stores/directory";
+import { onlinePeerIds } from "../../stores/members";
 import { identity } from "../../stores/identity";
 import { peerCount, nodeStatus } from "../../stores/connection";
 import { openModal } from "../../stores/ui";
+import * as tauri from "../../lib/tauri";
 import Avatar from "../common/Avatar";
 import Divider from "../common/Divider";
 
@@ -21,34 +22,18 @@ const HomeView: Component = () => {
   const [searchQuery, setSearchQuery] = createSignal("");
 
   // friends list comes from directory entries marked as friends
-  // fall back to dm conversations for peers not yet in the directory
   const allPeers = createMemo(() => {
     const friendList = friends();
-    const dms = dmConversations();
+    const onlineSet = onlinePeerIds();
 
-    // merge friends from directory with dm conversations
-    const merged = friendList.map((f) => ({
+    return friendList.map((f) => ({
       peer_id: f.peer_id,
       display_name: f.display_name,
       bio: f.bio,
-      // check dm conversations for status, default to offline
-      status: (dms.find((d) => d.peer_id === f.peer_id)?.status ??
-        "Offline") as "Online" | "Idle" | "Offline",
+      status: (onlineSet.has(f.peer_id) ? "Online" : "Offline") as
+        | "Online"
+        | "Offline",
     }));
-
-    // also include dm peers that aren't yet in the friends list
-    for (const dm of dms) {
-      if (!merged.some((m) => m.peer_id === dm.peer_id)) {
-        merged.push({
-          peer_id: dm.peer_id,
-          display_name: dm.display_name,
-          bio: "",
-          status: dm.status,
-        });
-      }
-    }
-
-    return merged;
   });
 
   // directory peers (all known, not just friends)
@@ -71,11 +56,14 @@ const HomeView: Component = () => {
             p.peer_id.toLowerCase().includes(query),
         );
       }
+      const onlineSet = onlinePeerIds();
       return peers.map((p) => ({
         peer_id: p.peer_id,
         display_name: p.display_name,
         bio: p.bio,
-        status: "Online" as const,
+        status: (onlineSet.has(p.peer_id) ? "Online" : "Offline") as
+          | "Online"
+          | "Offline",
         is_friend: p.is_friend,
       }));
     }
@@ -84,7 +72,7 @@ const HomeView: Component = () => {
 
     // filter by tab
     if (tab === "online") {
-      peers = peers.filter((p) => p.status === "Online" || p.status === "Idle");
+      peers = peers.filter((p) => p.status === "Online");
     }
 
     // filter by search
@@ -96,22 +84,36 @@ const HomeView: Component = () => {
   });
 
   const onlineCount = () =>
-    allPeers().filter((p) => p.status === "Online" || p.status === "Idle")
-      .length;
+    allPeers().filter((p) => p.status === "Online").length;
 
   function handleOpenDM(peerId: string) {
-    // ensure a dm conversation exists for this peer
-    const peer = allPeers().find((p) => p.peer_id === peerId);
-    if (peer) {
-      addDMConversation({
-        peer_id: peer.peer_id,
-        display_name: peer.display_name,
-        status: peer.status,
-        unread_count: 0,
+    const peer =
+      allPeers().find((p) => p.peer_id === peerId) ??
+      directoryPeers().find((p) => p.peer_id === peerId);
+    if (!peer) return;
+
+    const displayName = peer.display_name;
+
+    // create the conversation on the backend (persists + subscribes to topic)
+    tauri
+      .openDMConversation(peerId, displayName)
+      .then((meta) => {
+        addDMConversation(meta);
+        setActiveDM(peerId);
+        clearDMUnread(peerId);
+      })
+      .catch((e) => {
+        console.error("failed to open dm conversation:", e);
+        // fallback: still open the conversation locally
+        addDMConversation({
+          peer_id: peerId,
+          display_name: displayName,
+          last_message: null,
+          last_message_time: null,
+          unread_count: 0,
+        });
+        setActiveDM(peerId);
       });
-    }
-    setActiveDM(peerId);
-    clearDMUnread(peerId);
   }
 
   const tabs: { id: FriendsTab; label: string }[] = [
@@ -259,11 +261,7 @@ const HomeView: Component = () => {
                       </p>
                     </Show>
                     <p class="text-[13px] font-mono text-white/40 lowercase">
-                      {peer.status === "Online"
-                        ? "online"
-                        : peer.status === "Idle"
-                          ? "idle"
-                          : "offline"}
+                      {peer.status === "Online" ? "online" : "offline"}
                     </p>
                   </div>
                 </div>

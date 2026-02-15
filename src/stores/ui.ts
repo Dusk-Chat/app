@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup } from "solid-js";
+import { createSignal } from "solid-js";
 
 const [sidebarVisible, setSidebarVisible] = createSignal(true);
 const [channelListVisible, setChannelListVisible] = createSignal(true);
@@ -7,6 +7,43 @@ const [isMobile, setIsMobile] = createSignal(false);
 const [isTablet, setIsTablet] = createSignal(false);
 const [activeModal, setActiveModal] = createSignal<string | null>(null);
 const [modalData, setModalData] = createSignal<unknown>(null);
+
+// profile card popover state
+export interface ProfileCardTarget {
+  peerId: string;
+  displayName: string;
+  // anchor coordinates for positioning the card
+  anchorX: number;
+  anchorY: number;
+}
+
+const [profileCardTarget, setProfileCardTarget] =
+  createSignal<ProfileCardTarget | null>(null);
+
+export function openProfileCard(target: ProfileCardTarget) {
+  setProfileCardTarget(target);
+}
+
+export function closeProfileCard() {
+  setProfileCardTarget(null);
+}
+
+// detailed profile modal state
+const [profileModalPeerId, setProfileModalPeerId] = createSignal<string | null>(
+  null,
+);
+
+export function openProfileModal(peerId: string) {
+  // close the card popover when opening the full modal
+  closeProfileCard();
+  setProfileModalPeerId(peerId);
+}
+
+export function closeProfileModal() {
+  setProfileModalPeerId(null);
+}
+
+export { profileCardTarget, profileModalPeerId };
 
 function handleResize() {
   const width = window.innerWidth;

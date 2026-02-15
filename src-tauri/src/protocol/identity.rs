@@ -11,6 +11,7 @@ pub struct DuskIdentity {
     pub display_name: String,
     pub bio: String,
     pub created_at: u64,
+    pub verification_proof: Option<VerificationProof>,
 }
 
 impl DuskIdentity {
@@ -29,6 +30,7 @@ impl DuskIdentity {
             display_name: display_name.to_string(),
             bio: bio.to_string(),
             created_at,
+            verification_proof: None,
         }
     }
 
@@ -44,6 +46,7 @@ impl DuskIdentity {
         let peer_id = PeerId::from(keypair.public());
 
         let profile = storage.load_profile().unwrap_or_default();
+        let verification_proof = storage.load_verification_proof().ok().flatten();
 
         Ok(Self {
             keypair,
@@ -51,6 +54,7 @@ impl DuskIdentity {
             display_name: profile.display_name,
             bio: profile.bio,
             created_at: profile.created_at,
+            verification_proof,
         })
     }
 
@@ -86,6 +90,7 @@ impl DuskIdentity {
             public_key: hex::encode(public_key_bytes),
             bio: self.bio.clone(),
             created_at: self.created_at,
+            verification_proof: self.verification_proof.clone(),
         }
     }
 }
@@ -97,6 +102,17 @@ pub struct PublicIdentity {
     pub public_key: String,
     pub bio: String,
     pub created_at: u64,
+    pub verification_proof: Option<VerificationProof>,
+}
+
+// cryptographic proof that the identity was created through human verification
+// the signature binds this proof to a specific keypair so it cannot be reused
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationProof {
+    pub metrics_hash: String,
+    pub signature: String,
+    pub timestamp: u64,
+    pub score: f64,
 }
 
 // profile data stored on disk alongside the keypair

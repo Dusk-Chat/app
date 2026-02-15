@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use automerge::AutoCommit;
 
-use crate::protocol::community::{ChannelMeta, CommunityMeta};
+use crate::protocol::community::{CategoryMeta, ChannelMeta, CommunityMeta};
 use crate::protocol::messages::ChatMessage;
 use crate::storage::DiskStorage;
 
@@ -89,6 +89,50 @@ impl CrdtEngine {
             .ok_or("community not found")?;
 
         document::get_channels(doc, community_id)
+    }
+
+    // reorder channels in a community
+    pub fn reorder_channels(
+        &mut self,
+        community_id: &str,
+        channel_ids: &[String],
+    ) -> Result<Vec<ChannelMeta>, String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        let channels = document::reorder_channels(doc, community_id, channel_ids)?;
+        self.persist(community_id)?;
+        Ok(channels)
+    }
+
+    // add a category to a community
+    pub fn create_category(
+        &mut self,
+        community_id: &str,
+        category: &CategoryMeta,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::add_category(doc, category)
+            .map_err(|e| format!("failed to add category: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // get all categories in a community
+    pub fn get_categories(&self, community_id: &str) -> Result<Vec<CategoryMeta>, String> {
+        let doc = self
+            .documents
+            .get(community_id)
+            .ok_or("community not found")?;
+
+        document::get_categories(doc, community_id)
     }
 
     // append a message to a channel within a community

@@ -4,10 +4,17 @@ import { activeCommunityId } from "../../stores/communities";
 import { identity } from "../../stores/identity";
 import Avatar from "../common/Avatar";
 import SidebarLayout from "../common/SidebarLayout";
+import { openProfileCard } from "../../stores/ui";
 import * as tauri from "../../lib/tauri";
 
 const UserSidebar: Component = () => {
-  const [contextMenu, setContextMenu] = createSignal<{ x: number; y: number; memberId: string; memberName: string; memberRoles: string[] } | null>(null);
+  const [contextMenu, setContextMenu] = createSignal<{
+    x: number;
+    y: number;
+    memberId: string;
+    memberName: string;
+    memberRoles: string[];
+  } | null>(null);
 
   const groupedMembers = createMemo(() => {
     const memberList = members();
@@ -27,7 +34,10 @@ const UserSidebar: Component = () => {
   const currentUser = () => identity();
   const currentCommunityId = () => activeCommunityId();
 
-  function handleContextMenu(e: MouseEvent, member: { peer_id: string; display_name: string; roles: string[] }) {
+  function handleContextMenu(
+    e: MouseEvent,
+    member: { peer_id: string; display_name: string; roles: string[] },
+  ) {
     e.preventDefault();
     setContextMenu({
       x: e.clientX,
@@ -51,7 +61,9 @@ const UserSidebar: Component = () => {
     if (!user) return;
 
     const currentMember = members().find((m) => m.peer_id === user.peer_id);
-    const isAdmin = currentMember?.roles.some((r) => r === "admin" || r === "owner");
+    const isAdmin = currentMember?.roles.some(
+      (r) => r === "admin" || r === "owner",
+    );
 
     if (!isAdmin) {
       console.error("not authorized to kick members");
@@ -93,6 +105,14 @@ const UserSidebar: Component = () => {
                 <button
                   type="button"
                   class="flex items-center gap-3 w-full h-10 px-4 text-left hover:bg-gray-800 transition-colors duration-200 cursor-pointer group"
+                  onClick={(e) => {
+                    openProfileCard({
+                      peerId: member.peer_id,
+                      displayName: member.display_name,
+                      anchorX: e.clientX,
+                      anchorY: e.clientY,
+                    });
+                  }}
                   onContextMenu={(e) => handleContextMenu(e, member)}
                 >
                   <Avatar
@@ -126,9 +146,16 @@ const UserSidebar: Component = () => {
       <Show when={contextMenu()}>
         {(menu) => {
           const user = currentUser();
-          const currentMember = user ? members().find((m) => m.peer_id === user.peer_id) : null;
-          const isAdmin = currentMember?.roles.some((r) => r === "admin" || r === "owner");
-          const canKick = isAdmin && !menu().memberRoles.includes("owner") && menu().memberId !== user?.peer_id;
+          const currentMember = user
+            ? members().find((m) => m.peer_id === user.peer_id)
+            : null;
+          const isAdmin = currentMember?.roles.some(
+            (r) => r === "admin" || r === "owner",
+          );
+          const canKick =
+            isAdmin &&
+            !menu().memberRoles.includes("owner") &&
+            menu().memberId !== user?.peer_id;
 
           return (
             <div

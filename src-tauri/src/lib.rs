@@ -3,12 +3,15 @@ mod crdt;
 mod node;
 mod protocol;
 mod storage;
+mod verification;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::crdt::CrdtEngine;
 use crate::protocol::identity::DuskIdentity;
+use crate::protocol::messages::VoiceParticipant;
 use crate::storage::DiskStorage;
 
 // shared application state accessible from all tauri commands
@@ -17,6 +20,8 @@ pub struct AppState {
     pub crdt_engine: Arc<Mutex<CrdtEngine>>,
     pub storage: Arc<DiskStorage>,
     pub node_handle: Arc<Mutex<Option<node::NodeHandle>>>,
+    // tracks which peers are in which voice channels, keyed by "community_id:channel_id"
+    pub voice_channels: Arc<Mutex<HashMap<String, Vec<VoiceParticipant>>>>,
 }
 
 impl AppState {
@@ -36,6 +41,7 @@ impl AppState {
             crdt_engine,
             storage,
             node_handle: Arc::new(Mutex::new(None)),
+            voice_channels: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -48,6 +54,28 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::new())
+        .setup(|app| {
+            // grant microphone/camera permissions on linux webkitgtk
+            // without this, getUserMedia is denied by default
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    window
+                        .with_webview(|webview| {
+                            use webkit2gtk::PermissionRequestExt;
+                            use webkit2gtk::WebViewExt;
+                            let wv = webview.inner();
+                            wv.connect_permission_request(|_webview, request| {
+                                request.allow();
+                                true
+                            });
+                        })
+                        .ok();
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::identity::has_identity,
             commands::identity::load_identity,
@@ -67,6 +95,7 @@ pub fn run() {
             commands::chat::send_typing,
             commands::chat::start_node,
             commands::chat::stop_node,
+            commands::chat::check_internet_connectivity,
             commands::community::create_community,
             commands::community::join_community,
             commands::community::leave_community,
@@ -77,6 +106,22 @@ pub fn run() {
             commands::community::delete_message,
             commands::community::kick_member,
             commands::community::generate_invite,
+            commands::community::reorder_channels,
+            commands::community::create_category,
+            commands::community::get_categories,
+            commands::voice::join_voice_channel,
+            commands::voice::leave_voice_channel,
+            commands::voice::update_voice_media_state,
+            commands::voice::send_voice_sdp,
+            commands::voice::send_voice_ice_candidate,
+            commands::voice::get_voice_participants,
+            commands::dm::send_dm,
+            commands::dm::get_dm_messages,
+            commands::dm::get_dm_conversations,
+            commands::dm::mark_dm_read,
+            commands::dm::delete_dm_conversation,
+            commands::dm::send_dm_typing,
+            commands::dm::open_dm_conversation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dusk");
