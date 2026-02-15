@@ -1,8 +1,8 @@
-use libp2p::{
-    gossipsub, identify, kad, mdns, ping, relay,
-    rendezvous, request_response::cbor, swarm::NetworkBehaviour,
-};
 use crate::protocol::gif::{GifRequest, GifResponse};
+use libp2p::{
+    gossipsub, identify, kad, mdns, ping, relay, rendezvous, request_response::cbor,
+    swarm::NetworkBehaviour,
+};
 
 #[derive(NetworkBehaviour)]
 pub struct DuskBehaviour {

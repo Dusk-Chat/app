@@ -76,7 +76,9 @@ pub fn build_swarm(
                 mdns,
                 identify,
                 // ping every 30s to keep the relay connection alive
-                ping: ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(30))),
+                ping: ping::Behaviour::new(
+                    ping::Config::new().with_interval(Duration::from_secs(30)),
+                ),
                 // gif search via request-response to the relay (outbound only)
                 gif_service: cbor::Behaviour::<GifRequest, GifResponse>::new(
                     [(GIF_PROTOCOL, ProtocolSupport::Outbound)],

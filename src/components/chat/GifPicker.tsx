@@ -5,7 +5,8 @@ import type { GifResult } from "../../lib/types";
 import * as tauri from "../../lib/tauri";
 
 // detect if running inside tauri (vs standalone vite dev)
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 interface GifPickerProps {
   onSelect: (gifUrl: string) => void;

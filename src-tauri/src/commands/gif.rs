@@ -31,7 +31,8 @@ pub async fn search_gifs(
     // drop the lock before awaiting the response
     drop(handle_ref);
 
-    rx.await.map_err(|_| "gif search response channel closed".to_string())?
+    rx.await
+        .map_err(|_| "gif search response channel closed".to_string())?
 }
 
 #[tauri::command]
@@ -59,5 +60,6 @@ pub async fn get_trending_gifs(
 
     drop(handle_ref);
 
-    rx.await.map_err(|_| "trending gifs response channel closed".to_string())?
+    rx.await
+        .map_err(|_| "trending gifs response channel closed".to_string())?
 }

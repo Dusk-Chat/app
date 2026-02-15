@@ -351,8 +351,6 @@ export async function searchGifs(
   return invoke("search_gifs", { query, limit });
 }
 
-export async function getTrendingGifs(
-  limit?: number,
-): Promise<GifResponse> {
+export async function getTrendingGifs(limit?: number): Promise<GifResponse> {
   return invoke("get_trending_gifs", { limit });
 }
