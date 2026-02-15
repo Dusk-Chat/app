@@ -127,14 +127,19 @@ const DMSidebar: Component = () => {
       >
         <For each={filteredConversations()}>
           {(dm) => (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               class={`flex items-center gap-3 w-full px-3 py-2 transition-all duration-200 cursor-pointer group ${
                 activeDMPeerId() === dm.peer_id
                   ? "bg-gray-800 text-white"
                   : "text-white/60 hover:bg-gray-800/60 hover:text-white"
               }`}
               onClick={() => handleSelectDM(dm.peer_id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ")
+                  handleSelectDM(dm.peer_id);
+              }}
             >
               <Avatar
                 name={dm.display_name}
@@ -169,7 +174,7 @@ const DMSidebar: Component = () => {
                   </p>
                 </Show>
               </div>
-            </button>
+            </div>
           )}
         </For>
       </Show>
