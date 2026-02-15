@@ -45,9 +45,9 @@ const SplashScreen: Component<SplashScreenProps> = (props) => {
 
     animTimer = setTimeout(() => setAnimationComplete(true), 3450);
 
-    // if no connection after 5s, play exit and loop
+    // if no connection after 5s, play exit and loop (only for returning users)
     exitTimer = setTimeout(() => {
-      if (props.relayConnected) return;
+      if (props.relayConnected || !props.identity) return;
 
       setRetrying(true);
 
@@ -77,7 +77,7 @@ const SplashScreen: Component<SplashScreenProps> = (props) => {
 
   onMount(() => startCycle());
 
-  // handle successful relay connection
+  // handle successful relay connection for returning users
   createEffect(() => {
     if (animationComplete() && props.relayConnected && props.identity) {
       clearTimers();
@@ -85,6 +85,15 @@ const SplashScreen: Component<SplashScreenProps> = (props) => {
       setShowWelcome(true);
       setTimeout(() => setFading(true), 1200);
       setTimeout(() => props.onComplete(), 1700);
+    }
+  });
+
+  // fresh install - no identity on disk, play the animation then hand off to signup
+  createEffect(() => {
+    if (animationComplete() && !props.identity) {
+      clearTimers();
+      setFading(true);
+      setTimeout(() => props.onComplete(), 500);
     }
   });
 
