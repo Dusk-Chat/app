@@ -7,7 +7,18 @@ import {
   createSortable,
   closestCenter,
 } from "@thisbeyond/solid-dnd";
-import { Hash, Volume2, Plus, ChevronDown, FolderPlus, Mic, MicOff, Headphones, HeadphoneOff, PhoneOff } from "lucide-solid";
+import {
+  Hash,
+  Volume2,
+  Plus,
+  ChevronDown,
+  FolderPlus,
+  Mic,
+  MicOff,
+  Headphones,
+  HeadphoneOff,
+  PhoneOff,
+} from "lucide-solid";
 import {
   channels,
   categories,
@@ -297,14 +308,22 @@ const ChannelList: Component = () => {
               <>
                 <SortableChannel
                   channel={channel}
-                  isActive={channel.kind !== "Voice" && activeChannelId() === channel.id}
+                  isActive={
+                    channel.kind !== "Voice" && activeChannelId() === channel.id
+                  }
                   isInVoiceChannel={voiceChannelId() === channel.id}
                   icon={channel.kind === "Voice" ? Volume2 : Hash}
                   onClick={() => handleChannelClick(channel)}
                   ghost={getGhost(channel.id, props.channelList)}
                 />
                 {/* discord-style participant list under active voice channels */}
-                <Show when={channel.kind === "Voice" && voiceChannelId() === channel.id && voiceConnectionState() === "connected"}>
+                <Show
+                  when={
+                    channel.kind === "Voice" &&
+                    voiceChannelId() === channel.id &&
+                    voiceConnectionState() === "connected"
+                  }
+                >
                   <div class="pl-7 py-0.5">
                     <For each={voiceChannelParticipants()}>
                       {(participant) => (
@@ -496,7 +515,10 @@ const ChannelList: Component = () => {
             onClick={() => toggleDeafen()}
             title={localMediaState().deafened ? "Undeafen" : "Deafen"}
           >
-            <Show when={localMediaState().deafened} fallback={<Headphones size={16} />}>
+            <Show
+              when={localMediaState().deafened}
+              fallback={<Headphones size={16} />}
+            >
               <HeadphoneOff size={16} />
             </Show>
           </button>

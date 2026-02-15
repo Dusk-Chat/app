@@ -26,7 +26,9 @@ const ChatArea: Component<ChatAreaProps> = (props) => {
           <div class="flex-1 flex items-center justify-center">
             <div class="text-center text-white/30">
               <p class="text-[32px] font-bold mb-2">welcome to dusk</p>
-              <p class="text-[16px]">select a community and channel to start chatting</p>
+              <p class="text-[16px]">
+                select a community and channel to start chatting
+              </p>
             </div>
           </div>
         }

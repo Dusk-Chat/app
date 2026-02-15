@@ -14,16 +14,10 @@ const SidebarLayout: Component<ParentProps<SidebarLayoutProps>> = (props) => {
   return (
     <div class="w-full h-full bg-gray-900 flex flex-col">
       {/* header */}
-      {props.header && (
-        <div class="shrink-0">
-          {props.header}
-        </div>
-      )}
+      {props.header && <div class="shrink-0">{props.header}</div>}
 
       {/* body */}
-      <div class="flex-1 overflow-y-auto">
-        {props.children}
-      </div>
+      <div class="flex-1 overflow-y-auto">{props.children}</div>
 
       {/* voice controls or other content above the user footer */}
       {props.beforeFooter}
