@@ -18,6 +18,9 @@ import {
   Headphones,
   HeadphoneOff,
   PhoneOff,
+  Settings,
+  UserPlus,
+  LogOut,
 } from "lucide-solid";
 import {
   channels,
@@ -42,6 +45,8 @@ import {
 } from "../../stores/voice";
 import { identity } from "../../stores/identity";
 import SidebarLayout from "../common/SidebarLayout";
+import DropdownMenu from "../common/DropdownMenu";
+import type { DropdownItem } from "../common/DropdownMenu";
 import Avatar from "../common/Avatar";
 import type { ChannelMeta } from "../../lib/types";
 
@@ -282,6 +287,33 @@ const ChannelList: Component = () => {
     return all;
   };
 
+  // server dropdown state
+  const [serverDropdownOpen, setServerDropdownOpen] = createSignal(false);
+  let headerRef: HTMLDivElement | undefined;
+
+  const serverDropdownItems = (): DropdownItem[] => [
+    {
+      label: "server settings",
+      icon: Settings,
+      onClick: () => {
+        const comm = community();
+        if (comm) openModal("community-settings", { communityId: comm.id });
+      },
+    },
+    {
+      label: "invite people",
+      icon: UserPlus,
+      onClick: () => openModal("invite-people"),
+    },
+    {
+      label: "leave server",
+      icon: LogOut,
+      onClick: () => openModal("leave-server"),
+      destructive: true,
+      dividerAbove: true,
+    },
+  ];
+
   const handleChannelClick = (channel: ChannelMeta) => {
     if (channel.kind === "Voice") {
       // clicking a voice channel joins it (or switches to it)
@@ -350,7 +382,13 @@ const ChannelList: Component = () => {
 
   const header = (
     <div class="h-15 border-b border-white/10 flex flex-col justify-end">
-      <div class="h-12 flex items-center justify-between px-4">
+      <div
+        ref={headerRef}
+        class="h-12 flex items-center justify-between px-4 cursor-pointer hover:bg-white/5 transition-colors duration-200"
+        onClick={() => {
+          if (community()) setServerDropdownOpen((v) => !v);
+        }}
+      >
         <Show
           when={community()}
           fallback={
@@ -361,13 +399,26 @@ const ChannelList: Component = () => {
             {community()!.name}
           </span>
         </Show>
-        <button
-          type="button"
-          class="text-white/40 hover:text-white transition-colors duration-200 cursor-pointer"
-        >
-          <ChevronDown size={20} />
-        </button>
+        <Show when={community()}>
+          <div class="text-white/40 hover:text-white transition-colors duration-200">
+            <ChevronDown
+              size={20}
+              class="transition-transform duration-200"
+              style={{
+                transform: serverDropdownOpen()
+                  ? "rotate(180deg)"
+                  : "rotate(0deg)",
+              }}
+            />
+          </div>
+        </Show>
       </div>
+      <DropdownMenu
+        items={serverDropdownItems()}
+        isOpen={serverDropdownOpen()}
+        onClose={() => setServerDropdownOpen(false)}
+        anchorRef={headerRef}
+      />
     </div>
   );
 

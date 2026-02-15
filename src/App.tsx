@@ -14,16 +14,19 @@ import MobileNav from "./components/navigation/MobileNav";
 import Modal from "./components/common/Modal";
 import Button from "./components/common/Button";
 import SettingsModal from "./components/settings/SettingsModal";
+import CommunitySettingsModal from "./components/settings/CommunitySettingsModal";
 import SignUpScreen from "./components/auth/SignUpScreen";
 import SplashScreen from "./components/auth/SplashScreen";
 import UserDirectoryModal from "./components/directory/UserDirectoryModal";
 import ProfileCard from "./components/common/ProfileCard";
 import ProfileModal from "./components/common/ProfileModal";
+import { AlertTriangle } from "lucide-solid";
 
 import {
   overlayMenuOpen,
   closeOverlay,
   activeModal,
+  modalData,
   closeModal,
   openModal,
   initResponsive,
@@ -35,6 +38,8 @@ import {
   setActiveCommunity,
   activeCommunityId,
   addCommunity,
+  activeCommunity,
+  removeCommunity,
 } from "./stores/communities";
 import {
   setChannels,
@@ -51,6 +56,7 @@ import {
   removeMessage,
 } from "./stores/messages";
 import {
+  members,
   setMembers,
   addTypingPeer,
   setPeerOnline,
@@ -122,6 +128,9 @@ const App: Component = () => {
     string | null
   >(null);
   const [newCategoryName, setNewCategoryName] = createSignal("");
+  const [inviteCode, setInviteCode] = createSignal("");
+  const [inviteLoading, setInviteLoading] = createSignal(false);
+  const [inviteCopied, setInviteCopied] = createSignal(false);
 
   // react to community switches by loading channels, members, and selecting first channel
   createEffect(
@@ -201,6 +210,15 @@ const App: Component = () => {
         } catch (e) {
           console.error("failed to load dm messages:", e);
         }
+      }
+    }),
+  );
+
+  // automatically generate invite code when the invite modal opens
+  createEffect(
+    on(activeModal, (modal) => {
+      if (modal === "invite-people") {
+        handleOpenInvite();
       }
     }),
   );
@@ -678,6 +696,80 @@ const App: Component = () => {
     closeModal();
   }
 
+  // generates an invite code for the active community and opens the modal
+  async function handleOpenInvite() {
+    const communityId = activeCommunityId();
+    if (!communityId) return;
+
+    setInviteCode("");
+    setInviteCopied(false);
+    setInviteLoading(true);
+
+    if (tauriAvailable()) {
+      try {
+        const code = await tauri.generateInvite(communityId);
+        setInviteCode(code);
+      } catch (e) {
+        console.error("failed to generate invite:", e);
+      }
+    } else {
+      // demo mode - simulate invite code generation
+      setInviteCode("dusk_demo_invite_" + communityId.slice(4, 16));
+    }
+
+    setInviteLoading(false);
+  }
+
+  async function handleCopyInvite() {
+    const code = inviteCode();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      // fallback for nonsecure contexts
+      const textarea = document.createElement("textarea");
+      textarea.value = code;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    }
+  }
+
+  // check if the current user is the owner of the active community
+  const isCurrentUserOwner = () => {
+    const id = identity();
+    const memberList = members();
+    if (!id) return false;
+    const self = memberList.find((m) => m.peer_id === id.peer_id);
+    return self?.roles.includes("owner") ?? false;
+  };
+
+  async function handleLeaveServer() {
+    const communityId = activeCommunityId();
+    if (!communityId) return;
+
+    if (tauriAvailable()) {
+      try {
+        await tauri.leaveCommunity(communityId);
+      } catch (e) {
+        console.error("failed to leave community:", e);
+      }
+    }
+
+    removeCommunity(communityId);
+    setChannels([]);
+    setCategories([]);
+    setActiveChannel(null);
+    clearMessages();
+    setMembers([]);
+    closeModal();
+  }
+
   async function handleSaveSettings() {
     if (tauriAvailable()) {
       try {
@@ -1005,10 +1097,152 @@ const App: Component = () => {
           onResetIdentity={handleResetIdentity}
         />
 
+        <CommunitySettingsModal
+          isOpen={activeModal() === "community-settings"}
+          onClose={closeModal}
+          communityId={
+            (modalData() as { communityId: string } | null)?.communityId ?? null
+          }
+          initialSection={
+            ((modalData() as { initialSection?: string } | null)
+              ?.initialSection as any) ?? undefined
+          }
+        />
+
         <UserDirectoryModal
           isOpen={activeModal() === "directory"}
           onClose={closeModal}
         />
+
+        {/* invite people modal */}
+        <Modal
+          isOpen={activeModal() === "invite-people"}
+          onClose={closeModal}
+          title="invite people"
+        >
+          <div class="flex flex-col gap-4">
+            <p class="text-[14px] text-white/60">
+              share this invite code with others so they can join{" "}
+              <span class="text-white font-bold">
+                {activeCommunity()?.name ?? "this server"}
+              </span>
+            </p>
+            <Show
+              when={!inviteLoading()}
+              fallback={
+                <div class="flex items-center justify-center py-6">
+                  <span class="text-[14px] text-white/40 font-mono">
+                    generating...
+                  </span>
+                </div>
+              }
+            >
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  class="flex-1 bg-black border-2 border-white/20 text-white text-[14px] font-mono px-4 py-3 outline-none select-all focus:border-orange transition-colors duration-200"
+                  value={inviteCode()}
+                  readOnly
+                  onClick={(e) => e.currentTarget.select()}
+                />
+                <Button
+                  variant={inviteCopied() ? "secondary" : "primary"}
+                  onClick={handleCopyInvite}
+                >
+                  {inviteCopied() ? "copied" : "copy"}
+                </Button>
+              </div>
+            </Show>
+            <p class="text-[12px] text-white/30 font-mono">
+              invite codes never contain IP addresses. peers discover each other
+              through the relay.
+            </p>
+          </div>
+        </Modal>
+
+        {/* leave server confirmation modal */}
+        <Modal
+          isOpen={activeModal() === "leave-server"}
+          onClose={closeModal}
+          title="leave server"
+        >
+          <Show
+            when={isCurrentUserOwner()}
+            fallback={
+              <div class="flex flex-col gap-6">
+                <p class="text-[14px] text-white/60">
+                  are you sure you want to leave{" "}
+                  <span class="text-white font-bold">
+                    {activeCommunity()?.name ?? "this server"}
+                  </span>
+                  ? you can rejoin later with a new invite code.
+                </p>
+                <div class="flex gap-3 justify-end">
+                  <Button variant="secondary" onClick={closeModal}>
+                    cancel
+                  </Button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center h-12 px-6 text-[14px] font-medium uppercase tracking-[0.05em] bg-red-500 text-white border-none hover:bg-red-600 hover:scale-[0.98] active:scale-[0.96] transition-all duration-200 cursor-pointer select-none"
+                    onClick={handleLeaveServer}
+                  >
+                    leave server
+                  </button>
+                </div>
+              </div>
+            }
+          >
+            <div class="flex flex-col gap-6">
+              <div class="p-4 bg-orange/10 border-2 border-orange/30">
+                <div class="flex items-start gap-3">
+                  <AlertTriangle
+                    size={20}
+                    class="text-orange mt-0.5 shrink-0"
+                  />
+                  <div>
+                    <p class="text-[14px] text-white font-medium">
+                      you are the owner of{" "}
+                      <span class="text-orange font-bold">
+                        {activeCommunity()?.name ?? "this server"}
+                      </span>
+                    </p>
+                    <p class="text-[13px] text-white/50 mt-1">
+                      if you leave without transferring ownership, no one will
+                      have owner permissions. consider transferring ownership to
+                      another member first.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-3">
+                <button
+                  type="button"
+                  class="w-full h-12 text-[14px] font-medium uppercase tracking-[0.05em] bg-orange text-black hover:bg-orange/90 hover:scale-[0.98] active:scale-[0.96] transition-all duration-200 cursor-pointer select-none"
+                  onClick={() => {
+                    closeModal();
+                    openModal("community-settings", {
+                      communityId: activeCommunityId(),
+                      initialSection: "members",
+                    });
+                  }}
+                >
+                  transfer ownership
+                </button>
+                <button
+                  type="button"
+                  class="w-full h-12 text-[14px] font-medium uppercase tracking-[0.05em] bg-red-500 text-white border-none hover:bg-red-600 hover:scale-[0.98] active:scale-[0.96] transition-all duration-200 cursor-pointer select-none"
+                  onClick={handleLeaveServer}
+                >
+                  leave anyway
+                </button>
+                <Button variant="secondary" onClick={closeModal}>
+                  cancel
+                </Button>
+              </div>
+            </div>
+          </Show>
+        </Modal>
       </Show>
     </div>
   );

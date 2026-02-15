@@ -570,3 +570,109 @@ body {
   object-fit: contain;
   margin-top: 4px;
 }
+
+/* clickable media in messages */
+.dusk-media-clickable {
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.dusk-media-clickable:hover {
+  opacity: 0.85;
+}
+
+/* inline video in messages */
+.dusk-msg-video-wrapper {
+  white-space: normal;
+}
+
+.dusk-msg-video {
+  max-width: 400px;
+  max-height: 300px;
+  object-fit: contain;
+  margin-top: 4px;
+}
+
+/* ============================================================
+   lightbox overlay
+   ============================================================ */
+.dusk-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+  animation: dusk-lightbox-fade-in 150ms ease-out;
+}
+
+@keyframes dusk-lightbox-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dusk-lightbox-toolbar {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 3001;
+}
+
+.dusk-lightbox-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition:
+    color 200ms,
+    background 200ms;
+}
+
+.dusk-lightbox-btn:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.dusk-lightbox-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 4px;
+}
+
+.dusk-lightbox-media-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.dusk-lightbox-image {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: transform 100ms ease-out;
+}
+
+.dusk-lightbox-video {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  outline: none;
+}

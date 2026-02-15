@@ -1,7 +1,11 @@
 import type { Component } from "solid-js";
-import { For, Show, createEffect, createSignal, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, onMount, untrack } from "solid-js";
 import type { ChatMessage } from "../../lib/types";
-import { isWithinGroupWindow, isDifferentDay, formatDaySeparator } from "../../lib/utils";
+import {
+  isWithinGroupWindow,
+  isDifferentDay,
+  formatDaySeparator,
+} from "../../lib/utils";
 import Message from "./Message";
 import { ArrowDown } from "lucide-solid";
 
@@ -14,6 +18,8 @@ const MessageList: Component<MessageListProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
   const [showScrollButton, setShowScrollButton] = createSignal(false);
   const [isAtBottom, setIsAtBottom] = createSignal(true);
+  const [prevMessageCount, setPrevMessageCount] = createSignal(0);
+  const [shouldAnimateLast, setShouldAnimateLast] = createSignal(false);
 
   function scrollToBottom(smooth = true) {
     if (containerRef) {
@@ -32,6 +38,19 @@ const MessageList: Component<MessageListProps> = (props) => {
     setIsAtBottom(atBottom);
     setShowScrollButton(!atBottom);
   }
+
+  // track when messages are actually added vs view changes
+  createEffect(() => {
+    const currentCount = props.messages.length;
+    const prevCount = untrack(() => prevMessageCount());
+    
+    if (currentCount > prevCount && prevCount > 0) {
+      setShouldAnimateLast(true);
+    } else {
+      setShouldAnimateLast(false);
+    }
+    setPrevMessageCount(currentCount);
+  });
 
   // auto-scroll when new messages arrive if user is at the bottom
   createEffect(() => {
@@ -54,16 +73,28 @@ const MessageList: Component<MessageListProps> = (props) => {
         class="h-full overflow-y-auto"
         onScroll={handleScroll}
       >
-        <div class="flex flex-col py-4">
+        <div class="flex flex-col pb-4">
           <For each={props.messages}>
             {(message, index) => {
               const prev = () =>
                 index() > 0 ? props.messages[index() - 1] : undefined;
+              const next = () =>
+                index() < props.messages.length - 1
+                  ? props.messages[index() + 1]
+                  : undefined;
               const isFirstInGroup = () => {
                 const p = prev();
                 if (!p) return true;
                 if (p.author_id !== message.author_id) return true;
                 if (!isWithinGroupWindow(p.timestamp, message.timestamp))
+                  return true;
+                return false;
+              };
+              const isLastInGroup = () => {
+                const n = next();
+                if (!n) return true;
+                if (n.author_id !== message.author_id) return true;
+                if (!isWithinGroupWindow(message.timestamp, n.timestamp))
                   return true;
                 return false;
               };
@@ -74,10 +105,12 @@ const MessageList: Component<MessageListProps> = (props) => {
                 return isDifferentDay(p.timestamp, message.timestamp);
               };
 
+              const isLastMessage = () => index() === props.messages.length - 1;
+
               return (
                 <>
                   <Show when={showDaySeparator()}>
-                    <div class="flex items-center gap-4 px-4 py-2 my-2">
+                    <div class="flex items-center gap-4 px-4 my-4">
                       <div class="flex-1 border-t border-white/10" />
                       <span class="text-[12px] font-mono text-white/40 uppercase tracking-[0.05em]">
                         {formatDaySeparator(message.timestamp)}
@@ -85,11 +118,12 @@ const MessageList: Component<MessageListProps> = (props) => {
                       <div class="flex-1 border-t border-white/10" />
                     </div>
                   </Show>
-                  <div class="animate-message-in">
+                  <div class={isLastMessage() && shouldAnimateLast() ? "animate-message-in" : ""}>
                     <Message
                       message={message}
                       isGrouped={isGrouped()}
                       isFirstInGroup={isFirstInGroup()}
+                      isLastInGroup={isLastInGroup()}
                     />
                   </div>
                 </>

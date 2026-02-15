@@ -1,12 +1,14 @@
 import type { Component } from "solid-js";
 import { Show, createSignal, createMemo } from "solid-js";
 import type { ChatMessage } from "../../lib/types";
-import { formatTime, formatTimeShort } from "../../lib/utils";
-import { renderMarkdown, isStandaloneImageUrl } from "../../lib/markdown";
+import { formatTime } from "../../lib/utils";
+import { renderMarkdown, getStandaloneMediaKind } from "../../lib/markdown";
+import type { MediaKind } from "../../lib/markdown";
 import { removeMessage } from "../../stores/messages";
 import { activeCommunityId } from "../../stores/communities";
 import { identity } from "../../stores/identity";
 import Avatar from "../common/Avatar";
+import Lightbox from "../common/Lightbox";
 import { openProfileCard } from "../../stores/ui";
 import * as tauri from "../../lib/tauri";
 
@@ -14,6 +16,7 @@ interface MessageProps {
   message: ChatMessage;
   isGrouped: boolean;
   isFirstInGroup: boolean;
+  isLastInGroup: boolean;
 }
 
 const Message: Component<MessageProps> = (props) => {
@@ -29,7 +32,11 @@ const Message: Component<MessageProps> = (props) => {
   const renderedContent = createMemo(() =>
     renderMarkdown(props.message.content),
   );
-  const isImage = createMemo(() => isStandaloneImageUrl(props.message.content));
+  const mediaKind = createMemo<MediaKind>(() =>
+    getStandaloneMediaKind(props.message.content),
+  );
+
+  const [lightboxOpen, setLightboxOpen] = createSignal(false);
 
   const isOwner = () => {
     const user = currentUser();
@@ -69,6 +76,15 @@ const Message: Component<MessageProps> = (props) => {
     });
   }
 
+  // opens lightbox when clicking any media element in the message
+  function handleMediaClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains("dusk-media-clickable")) {
+      e.stopPropagation();
+      setLightboxOpen(true);
+    }
+  }
+
   // close context menu on click outside
   if (typeof window !== "undefined") {
     window.addEventListener("click", closeContextMenu);
@@ -76,24 +92,18 @@ const Message: Component<MessageProps> = (props) => {
 
   return (
     <div
-      class={`flex gap-4 hover:bg-gray-900 transition-colors duration-200 ${
-        props.isFirstInGroup ? "pt-4 px-4 pb-1" : "px-4 py-0.5"
-      }`}
+      class={`flex items-start gap-4 hover:bg-gray-900 transition-colors duration-200 px-4 ${
+        props.isFirstInGroup ? "pt-2" : "pt-0.5"
+      } ${props.isLastInGroup ? "pb-2" : "pb-0.5"}`}
       onContextMenu={handleContextMenu}
     >
       <Show
         when={props.isFirstInGroup}
-        fallback={
-          <div class="w-10 shrink-0 flex items-start justify-center">
-            <span class="text-[11px] font-mono text-white/0 hover:text-white/40 transition-colors duration-200 leading-[22px]">
-              {formatTimeShort(props.message.timestamp)}
-            </span>
-          </div>
-        }
+        fallback={<div class="w-10 shrink-0" />}
       >
         <button
           type="button"
-          class="w-10 shrink-0 pt-0.5 cursor-pointer"
+          class="w-10 shrink-0 cursor-pointer mt-0.5"
           onClick={handleProfileClick}
         >
           <Avatar name={props.message.author_name} size="md" />
@@ -120,17 +130,28 @@ const Message: Component<MessageProps> = (props) => {
         </Show>
 
         <Show
-          when={!isImage()}
+          when={!mediaKind()}
           fallback={
             <div
-              class="dusk-msg-content dusk-msg-image-wrapper"
+              class={`dusk-msg-content ${mediaKind() === "image" ? "dusk-msg-image-wrapper" : "dusk-msg-video-wrapper"}`}
               innerHTML={renderedContent()}
+              onClick={handleMediaClick}
             />
           }
         >
           <div class="dusk-msg-content" innerHTML={renderedContent()} />
         </Show>
       </div>
+
+      {/* media lightbox */}
+      <Show when={mediaKind()}>
+        <Lightbox
+          isOpen={lightboxOpen()}
+          onClose={() => setLightboxOpen(false)}
+          src={props.message.content.trim()}
+          type={mediaKind()!}
+        />
+      </Show>
 
       {/* context menu */}
       <Show when={contextMenu()}>

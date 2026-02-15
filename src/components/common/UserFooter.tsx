@@ -65,7 +65,7 @@ const UserFooter: Component<UserFooterProps> = (props) => {
   });
 
   return (
-    <div class="h-16 shrink-0 flex items-center gap-3 px-3 bg-black border-t border-white/10 relative">
+    <div class="h-[67px] shrink-0 flex items-center gap-3 px-3 bg-black border-t border-white/10 relative">
       <Show when={user()}>
         <div
           ref={triggerRef}

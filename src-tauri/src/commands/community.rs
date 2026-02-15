@@ -9,6 +9,44 @@ use crate::protocol::community::{CategoryMeta, ChannelKind, ChannelMeta, Communi
 use crate::protocol::messages::PeerStatus;
 use crate::AppState;
 
+// check if the requester has one of the required roles in the community
+fn check_permission(
+    members: &[Member],
+    requester_id: &str,
+    required_roles: &[&str],
+) -> Result<(), String> {
+    let requester = members
+        .iter()
+        .find(|m| m.peer_id == requester_id)
+        .ok_or("requester not found in community")?;
+
+    let has_permission = requester
+        .roles
+        .iter()
+        .any(|r| required_roles.contains(&r.as_str()));
+
+    if !has_permission {
+        return Err("insufficient permissions".to_string());
+    }
+
+    Ok(())
+}
+
+// helper to broadcast a crdt change to peers via the sync topic
+async fn broadcast_sync(state: &State<'_, AppState>, community_id: &str) {
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let sync_topic = "dusk/sync".to_string();
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::SendMessage {
+                topic: sync_topic,
+                data: community_id.as_bytes().to_vec(),
+            })
+            .await;
+    }
+}
+
 #[tauri::command]
 pub async fn create_community(
     state: State<'_, AppState>,
@@ -515,19 +553,230 @@ pub async fn reorder_channels(
     let channels = engine.reorder_channels(&community_id, &channel_ids)?;
     drop(engine);
 
-    // broadcast the reordering to peers via document sync
-    // the change will propagate through the existing gossipsub sync mechanism
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(channels)
+}
+
+#[tauri::command]
+pub async fn update_community(
+    state: State<'_, AppState>,
+    community_id: String,
+    name: String,
+    description: String,
+) -> Result<CommunityMeta, String> {
+    if name.len() > 64 {
+        return Err("community name must be 64 characters or fewer".to_string());
+    }
+    if description.len() > 256 {
+        return Err("description must be 256 characters or fewer".to_string());
+    }
+    if name.trim().is_empty() {
+        return Err("community name cannot be empty".to_string());
+    }
+
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.update_community_meta(&community_id, &name, &description)?;
+    let meta = engine.get_community_meta(&community_id)?;
+    let _ = state.storage.save_community_meta(&meta);
+    drop(engine);
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(meta)
+}
+
+#[tauri::command]
+pub async fn update_channel(
+    state: State<'_, AppState>,
+    community_id: String,
+    channel_id: String,
+    name: String,
+    topic: String,
+) -> Result<ChannelMeta, String> {
+    if name.trim().is_empty() {
+        return Err("channel name cannot be empty".to_string());
+    }
+
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.update_channel(&community_id, &channel_id, &name, &topic)?;
+    let channels = engine.get_channels(&community_id)?;
+    drop(engine);
+
+    let channel = channels
+        .into_iter()
+        .find(|c| c.id == channel_id)
+        .ok_or("channel not found after update")?;
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(channel)
+}
+
+#[tauri::command]
+pub async fn delete_channel(
+    state: State<'_, AppState>,
+    community_id: String,
+    channel_id: String,
+) -> Result<(), String> {
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
+    // unsubscribe from channel topics before deletion
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
-        let sync_topic = "dusk/sync".to_string();
+        let msg_topic = gossip::topic_for_messages(&community_id, &channel_id);
         let _ = handle
             .command_tx
-            .send(NodeCommand::SendMessage {
-                topic: sync_topic,
-                data: community_id.as_bytes().to_vec(),
+            .send(NodeCommand::Unsubscribe { topic: msg_topic })
+            .await;
+        let typing_topic = gossip::topic_for_typing(&community_id, &channel_id);
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::Unsubscribe {
+                topic: typing_topic,
             })
             .await;
     }
+    drop(node_handle);
 
-    Ok(channels)
+    let mut engine = state.crdt_engine.lock().await;
+    engine.delete_channel(&community_id, &channel_id)?;
+    drop(engine);
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_category(
+    state: State<'_, AppState>,
+    community_id: String,
+    category_id: String,
+) -> Result<(), String> {
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.delete_category(&community_id, &category_id)?;
+    drop(engine);
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_member_role(
+    state: State<'_, AppState>,
+    community_id: String,
+    member_peer_id: String,
+    role: String,
+) -> Result<(), String> {
+    if role != "admin" && role != "member" {
+        return Err("invalid role: must be 'admin' or 'member'".to_string());
+    }
+
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    // only the owner can change roles
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner"])?;
+
+    // cannot change the owner's own role through this command
+    let target = members
+        .iter()
+        .find(|m| m.peer_id == member_peer_id)
+        .ok_or("member not found")?;
+
+    if target.roles.iter().any(|r| r == "owner") {
+        return Err("cannot change the owner's role, use transfer_ownership instead".to_string());
+    }
+
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.set_member_role(&community_id, &member_peer_id, &[role])?;
+    drop(engine);
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn transfer_ownership(
+    state: State<'_, AppState>,
+    community_id: String,
+    new_owner_peer_id: String,
+) -> Result<(), String> {
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner"])?;
+
+    if requester_id == new_owner_peer_id {
+        return Err("cannot transfer ownership to yourself".to_string());
+    }
+
+    // verify the target is actually a member
+    members
+        .iter()
+        .find(|m| m.peer_id == new_owner_peer_id)
+        .ok_or("target member not found in community")?;
+
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.transfer_ownership(&community_id, &requester_id, &new_owner_peer_id)?;
+    let meta = engine.get_community_meta(&community_id)?;
+    let _ = state.storage.save_community_meta(&meta);
+    drop(engine);
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(())
 }

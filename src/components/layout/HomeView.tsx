@@ -282,18 +282,7 @@ const HomeView: Component = () => {
         </Show>
       </div>
 
-      {/* status bar at the bottom */}
-      <div class="h-8 shrink-0 flex items-center justify-between px-6 border-t border-white/10">
-        <span class="text-[11px] font-mono text-white/30">
-          {nodeStatus() === "running"
-            ? peerCount() > 0
-              ? `connected - ${peerCount()} peers on network`
-              : "searching for peers..."
-            : nodeStatus() === "starting"
-              ? "connecting to network..."
-              : "offline"}
-        </span>
-      </div>
+      
     </div>
   );
 };

@@ -296,6 +296,115 @@ impl CrdtEngine {
         self.documents.get_mut(community_id).map(|doc| doc.save())
     }
 
+    // update community name and description
+    pub fn update_community_meta(
+        &mut self,
+        community_id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::update_community_meta(doc, name, description)
+            .map_err(|e| format!("failed to update community meta: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // update a channel's name and topic
+    pub fn update_channel(
+        &mut self,
+        community_id: &str,
+        channel_id: &str,
+        name: &str,
+        topic: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::update_channel(doc, channel_id, name, topic)
+            .map_err(|e| format!("failed to update channel: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // remove a channel from a community
+    pub fn delete_channel(&mut self, community_id: &str, channel_id: &str) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::delete_channel(doc, channel_id)
+            .map_err(|e| format!("failed to delete channel: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // remove a category and ungroup its channels
+    pub fn delete_category(
+        &mut self,
+        community_id: &str,
+        category_id: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::delete_category(doc, category_id)
+            .map_err(|e| format!("failed to delete category: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // replace a member's roles
+    pub fn set_member_role(
+        &mut self,
+        community_id: &str,
+        peer_id: &str,
+        roles: &[String],
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::set_member_role(doc, peer_id, roles)
+            .map_err(|e| format!("failed to set member role: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // transfer ownership from one member to another
+    pub fn transfer_ownership(
+        &mut self,
+        community_id: &str,
+        old_owner_id: &str,
+        new_owner_id: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::transfer_ownership(doc, old_owner_id, new_owner_id)
+            .map_err(|e| format!("failed to transfer ownership: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
     // drop all in-memory documents (used during identity reset)
     pub fn clear(&mut self) {
         self.documents.clear();

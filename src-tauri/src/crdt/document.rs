@@ -564,3 +564,135 @@ pub fn remove_member(doc: &mut AutoCommit, peer_id: &str) -> Result<(), String> 
 
     Ok(())
 }
+
+// update the community name and description in the meta map
+pub fn update_community_meta(
+    doc: &mut AutoCommit,
+    name: &str,
+    description: &str,
+) -> Result<(), automerge::AutomergeError> {
+    let meta = doc
+        .get(ROOT, "meta")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("meta not found".to_string()))?;
+
+    doc.put(&meta, "name", name)?;
+    doc.put(&meta, "description", description)?;
+
+    Ok(())
+}
+
+// update a channel's name and topic
+pub fn update_channel(
+    doc: &mut AutoCommit,
+    channel_id: &str,
+    name: &str,
+    topic: &str,
+) -> Result<(), automerge::AutomergeError> {
+    let channels = doc
+        .get(ROOT, "channels")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("channels not found".to_string()))?;
+
+    let channel = doc
+        .get(&channels, channel_id)?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("channel not found".to_string()))?;
+
+    doc.put(&channel, "name", name)?;
+    doc.put(&channel, "topic", topic)?;
+
+    Ok(())
+}
+
+// remove a channel and all its messages from the document
+pub fn delete_channel(
+    doc: &mut AutoCommit,
+    channel_id: &str,
+) -> Result<(), automerge::AutomergeError> {
+    let channels = doc
+        .get(ROOT, "channels")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("channels not found".to_string()))?;
+
+    doc.delete(&channels, channel_id)?;
+
+    Ok(())
+}
+
+// remove a category and ungroup any channels that referenced it
+pub fn delete_category(
+    doc: &mut AutoCommit,
+    category_id: &str,
+) -> Result<(), automerge::AutomergeError> {
+    let categories = doc
+        .get(ROOT, "categories")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| {
+            automerge::AutomergeError::InvalidObjId("categories not found".to_string())
+        })?;
+
+    doc.delete(&categories, category_id)?;
+
+    // clear category_id on any channels that were in this category
+    if let Some((_, channels_id)) = doc.get(ROOT, "channels")? {
+        let keys: Vec<String> = doc.keys(&channels_id).collect();
+        for key in keys {
+            if let Some((_, ch_id)) = doc.get(&channels_id, &key)? {
+                if let Some(cat_id) = get_str(doc, &ch_id, "category_id") {
+                    if cat_id == category_id {
+                        doc.delete(&ch_id, "category_id")?;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// replace a member's roles list with the given roles
+pub fn set_member_role(
+    doc: &mut AutoCommit,
+    peer_id: &str,
+    roles: &[String],
+) -> Result<(), automerge::AutomergeError> {
+    let members = doc
+        .get(ROOT, "members")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("members not found".to_string()))?;
+
+    let member = doc
+        .get(&members, peer_id)?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("member not found".to_string()))?;
+
+    // remove existing roles list and recreate with new roles
+    doc.delete(&member, "roles")?;
+    let roles_list = doc.put_object(&member, "roles", ObjType::List)?;
+    for (i, role) in roles.iter().enumerate() {
+        doc.insert(&roles_list, i, role.as_str())?;
+    }
+
+    Ok(())
+}
+
+// transfer ownership from one member to another
+// demotes old owner to admin, promotes new member to owner, updates meta.created_by
+pub fn transfer_ownership(
+    doc: &mut AutoCommit,
+    old_owner_id: &str,
+    new_owner_id: &str,
+) -> Result<(), automerge::AutomergeError> {
+    set_member_role(doc, old_owner_id, &["admin".to_string()])?;
+    set_member_role(doc, new_owner_id, &["owner".to_string()])?;
+
+    let meta = doc
+        .get(ROOT, "meta")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("meta not found".to_string()))?;
+
+    doc.put(&meta, "created_by", new_owner_id)?;
+
+    Ok(())
+}

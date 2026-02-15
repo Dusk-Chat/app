@@ -31,4 +31,32 @@ export async function reorderChannels(channelIds: string[]): Promise<void> {
   }
 }
 
+export function removeChannel(channelId: string) {
+  setChannels((prev) => prev.filter((c) => c.id !== channelId));
+  // switch to the first remaining channel if the deleted one was active
+  if (activeChannelId() === channelId) {
+    const remaining = channels();
+    setActiveChannelId(remaining.length > 0 ? remaining[0].id : null);
+  }
+}
+
+export function removeCategory(categoryId: string) {
+  setCategories((prev) => prev.filter((c) => c.id !== categoryId));
+  // ungroup any channels that were in this category
+  setChannels((prev) =>
+    prev.map((c) =>
+      c.category_id === categoryId ? { ...c, category_id: null } : c,
+    ),
+  );
+}
+
+export function updateChannelMeta(
+  channelId: string,
+  updates: Partial<ChannelMeta>,
+) {
+  setChannels((prev) =>
+    prev.map((c) => (c.id === channelId ? { ...c, ...updates } : c)),
+  );
+}
+
 export { channels, categories, activeChannelId, setChannels, setCategories };

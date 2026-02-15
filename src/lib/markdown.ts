@@ -50,18 +50,59 @@ function textNodeToMarkdown(node: JSONContent): string {
   return text;
 }
 
+// known gif/image cdn domains that may not use file extensions in their urls
+const GIF_CDN_HOSTS = [
+  "static.klipy.com",
+  "media.tenor.com",
+  "media1.tenor.com",
+  "c.tenor.com",
+];
+
 // check if a string is a standalone image/gif url (no other text)
 export function isStandaloneImageUrl(text: string): boolean {
-  return /^https?:\/\/\S+\.(gif|png|jpg|jpeg|webp)(\?\S*)?$/i.test(text.trim());
+  const trimmed = text.trim();
+
+  // match common image file extensions
+  if (/^https?:\/\/\S+\.(gif|png|jpg|jpeg|webp)(\?\S*)?$/i.test(trimmed)) {
+    return true;
+  }
+
+  // match known gif cdn domains regardless of extension
+  try {
+    const url = new URL(trimmed);
+    return GIF_CDN_HOSTS.includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+// check if a string is a standalone video url
+export function isStandaloneVideoUrl(text: string): boolean {
+  const trimmed = text.trim();
+  return /^https?:\/\/\S+\.(mp4|webm|mov|ogg)(\?\S*)?$/i.test(trimmed);
+}
+
+// determine what kind of standalone media a message contains, if any
+export type MediaKind = "image" | "video" | null;
+export function getStandaloneMediaKind(text: string): MediaKind {
+  if (isStandaloneImageUrl(text)) return "image";
+  if (isStandaloneVideoUrl(text)) return "video";
+  return null;
 }
 
 // parse markdown-formatted text into safe html for display
 // only produces a limited set of elements - no script injection possible
 export function renderMarkdown(text: string): string {
-  // standalone image url gets rendered as a full image
+  // standalone image url gets rendered as a clickable image
   if (isStandaloneImageUrl(text)) {
     const url = escapeHtml(text.trim());
-    return `<img src="${url}" class="dusk-msg-image" alt="image" loading="lazy" />`;
+    return `<img src="${url}" class="dusk-msg-image dusk-media-clickable" alt="image" loading="lazy" />`;
+  }
+
+  // standalone video url gets rendered as an inline video player
+  if (isStandaloneVideoUrl(text)) {
+    const url = escapeHtml(text.trim());
+    return `<video src="${url}" class="dusk-msg-video dusk-media-clickable" preload="metadata" loop muted autoplay playsinline><track kind="captions" /></video>`;
   }
 
   // split by inline code spans to avoid parsing markdown inside code

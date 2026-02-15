@@ -105,4 +105,10 @@ export function removeMember(peerId: string) {
   });
 }
 
+export function updateMemberRole(peerId: string, roles: string[]) {
+  setMembers((prev) =>
+    prev.map((m) => (m.peer_id === peerId ? { ...m, roles } : m)),
+  );
+}
+
 export { members, typingPeerIds, setMembers, onlinePeerIds };

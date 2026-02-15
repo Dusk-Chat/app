@@ -46,4 +46,13 @@ export async function leaveCommunity(communityId: string): Promise<void> {
   removeCommunity(communityId);
 }
 
+export function updateCommunityMeta(
+  id: string,
+  updates: Partial<CommunityMeta>,
+) {
+  setCommunities((prev) =>
+    prev.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+  );
+}
+
 export { communities, activeCommunityId, setCommunities };

@@ -132,6 +132,54 @@ export async function reorderChannels(
   return invoke("reorder_channels", { communityId, channelIds });
 }
 
+// -- community settings --
+
+export async function updateCommunity(
+  communityId: string,
+  name: string,
+  description: string,
+): Promise<CommunityMeta> {
+  return invoke("update_community", { communityId, name, description });
+}
+
+export async function updateChannel(
+  communityId: string,
+  channelId: string,
+  name: string,
+  topic: string,
+): Promise<ChannelMeta> {
+  return invoke("update_channel", { communityId, channelId, name, topic });
+}
+
+export async function deleteChannel(
+  communityId: string,
+  channelId: string,
+): Promise<void> {
+  return invoke("delete_channel", { communityId, channelId });
+}
+
+export async function deleteCategory(
+  communityId: string,
+  categoryId: string,
+): Promise<void> {
+  return invoke("delete_category", { communityId, categoryId });
+}
+
+export async function setMemberRole(
+  communityId: string,
+  memberPeerId: string,
+  role: string,
+): Promise<void> {
+  return invoke("set_member_role", { communityId, memberPeerId, role });
+}
+
+export async function transferOwnership(
+  communityId: string,
+  newOwnerPeerId: string,
+): Promise<void> {
+  return invoke("transfer_ownership", { communityId, newOwnerPeerId });
+}
+
 // -- messages --
 
 export async function sendMessage(
