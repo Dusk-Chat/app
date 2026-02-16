@@ -107,6 +107,13 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
           channelName={dm()!.display_name}
           onSend={props.onSendDM}
           onTyping={props.onTyping}
+          mentionPeers={[
+            {
+              id: dm()!.peer_id,
+              name: dm()!.display_name,
+              status: onlinePeerIds().has(dm()!.peer_id) ? "Online" : "Offline",
+            },
+          ]}
         />
       </Show>
     </div>

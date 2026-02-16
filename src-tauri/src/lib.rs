@@ -112,6 +112,7 @@ pub fn run() {
             commands::identity::discover_global_peers,
             commands::identity::set_relay_address,
             commands::identity::reset_identity,
+            commands::identity::cache_avatar_icon,
             commands::chat::send_message,
             commands::chat::get_messages,
             commands::chat::send_typing,

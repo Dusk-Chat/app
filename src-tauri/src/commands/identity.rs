@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::State;
@@ -403,4 +404,29 @@ pub async fn reset_identity(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| format!("failed to wipe data: {}", e))?;
 
     Ok(())
+}
+
+// write an svg string to a cache directory and return the absolute path
+// used for notification icons so the os can display the user's avatar
+#[tauri::command]
+pub async fn cache_avatar_icon(
+    cache_key: String,
+    svg_content: String,
+) -> Result<String, String> {
+    let cache_dir = std::env::temp_dir().join("dusk-avatars");
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("failed to create avatar cache dir: {}", e))?;
+
+    let file_path: PathBuf = cache_dir.join(format!("{}.svg", cache_key));
+
+    // skip write if already cached with the same key
+    if !file_path.exists() {
+        std::fs::write(&file_path, svg_content)
+            .map_err(|e| format!("failed to write avatar svg: {}", e))?;
+    }
+
+    file_path
+        .to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "invalid path encoding".to_string())
 }

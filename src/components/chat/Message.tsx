@@ -85,6 +85,20 @@ const Message: Component<MessageProps> = (props) => {
     }
   }
 
+  // open profile card when clicking a mention span
+  function handleContentClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains("dusk-mention") && target.dataset.peerId) {
+      e.stopPropagation();
+      openProfileCard({
+        peerId: target.dataset.peerId,
+        displayName: target.textContent?.replace(/^@/, "") ?? "",
+        anchorX: e.clientX,
+        anchorY: e.clientY,
+      });
+    }
+  }
+
   // close context menu on click outside
   if (typeof window !== "undefined") {
     window.addEventListener("click", closeContextMenu);
@@ -139,7 +153,11 @@ const Message: Component<MessageProps> = (props) => {
             />
           }
         >
-          <div class="dusk-msg-content" innerHTML={renderedContent()} />
+          <div
+            class="dusk-msg-content"
+            innerHTML={renderedContent()}
+            onClick={handleContentClick}
+          />
         </Show>
       </div>
 

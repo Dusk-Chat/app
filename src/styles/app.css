@@ -560,6 +560,44 @@ body {
   opacity: 0.85;
 }
 
+.dusk-mention {
+  color: var(--color-accent);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: opacity var(--transition-fast);
+}
+
+.dusk-mention:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+/* mention nodes inside the tiptap editor */
+.ProseMirror .dusk-mention {
+  color: var(--color-accent);
+  font-weight: 500;
+  background: rgba(255, 79, 0, 0.1);
+  padding: 1px 4px;
+}
+
+.dusk-mention-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.dusk-mention-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dusk-mention-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dusk-mention-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .dusk-msg-image-wrapper {
   white-space: normal;
 }

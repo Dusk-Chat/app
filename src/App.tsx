@@ -49,6 +49,7 @@ import {
   addCategory,
   categories,
   channels,
+  getLastChannel,
 } from "./stores/channels";
 import {
   addMessage,
@@ -111,9 +112,11 @@ import { resetSettings } from "./stores/settings";
 import {
   initNotifications,
   notifyChannelMessage,
+  notifyMention,
   notifyDirectMessage,
   isWindowFocused,
 } from "./lib/notifications";
+import { isMentioned } from "./lib/mentions";
 
 const App: Component = () => {
   let cleanupResize: (() => void) | undefined;
@@ -162,7 +165,9 @@ const App: Component = () => {
           setCategories(cats);
 
           if (chs.length > 0) {
-            setActiveChannel(chs[0].id);
+            const last = getLastChannel(communityId);
+            const restored = last && chs.some((c) => c.id === last);
+            setActiveChannel(restored ? last : chs[0].id);
           } else {
             setActiveChannel(null);
             clearMessages();
@@ -319,11 +324,7 @@ const App: Component = () => {
       // from the backend will set the accurate state once peers are found.
       setNodeStatus("running");
 
-      // the createEffect on activeCommunityId handles loading channels,
-      // messages, and members reactively when this is set
-      if (communities.length > 0) {
-        setActiveCommunity(communities[0].id);
-      }
+      // start at the home screen, user can select a community from the sidebar
     } catch (e) {
       console.error("initialization error:", e);
       setNodeStatus("error");
@@ -336,19 +337,39 @@ const App: Component = () => {
         const msg = event.payload;
         const currentChannelId = activeChannelId();
         const currentCommunity = activeCommunity();
+        const currentPeerId = identity()?.peer_id;
 
         // add to store if this is the active channel
         if (msg.channel_id === currentChannelId) {
           addMessage(msg);
         }
 
-        // send notification if window is not focused or this is not the active channel
-        if (!isWindowFocused() || msg.channel_id !== currentChannelId) {
+        // check if the current user is mentioned in this message
+        const mentioned =
+          currentPeerId && isMentioned(msg.content, currentPeerId);
+
+        if (mentioned && msg.channel_id !== currentChannelId) {
+          // mention notifications fire even when the window is focused,
+          // as long as it isnt the active channel
           const channelList = channels();
           const channel = channelList.find((c) => c.id === msg.channel_id);
           const channelName = channel?.name ?? "unknown channel";
           const communityName = currentCommunity?.name ?? "unknown community";
-          notifyChannelMessage(msg, channelName, communityName);
+          const communityId =
+            channel?.community_id ?? currentCommunity?.id ?? "";
+          notifyMention(msg, channelName, communityName, communityId);
+        } else if (
+          !isWindowFocused() ||
+          msg.channel_id !== currentChannelId
+        ) {
+          // regular notification for non-mention messages
+          const channelList = channels();
+          const channel = channelList.find((c) => c.id === msg.channel_id);
+          const channelName = channel?.name ?? "unknown channel";
+          const communityName = currentCommunity?.name ?? "unknown community";
+          const communityId =
+            channel?.community_id ?? currentCommunity?.id ?? "";
+          notifyChannelMessage(msg, channelName, communityName, communityId);
         }
         break;
       }
@@ -417,15 +438,18 @@ const App: Component = () => {
         // send notification if window is not focused or this is not the active dm
         const currentDMPeer = activeDMPeerId();
         if (!isWindowFocused() || dm.from_peer !== currentDMPeer) {
-          notifyDirectMessage({
-            id: dm.id,
-            channel_id: "",
-            author_id: dm.from_peer,
-            author_name: dm.from_display_name,
-            content: dm.content,
-            timestamp: dm.timestamp,
-            edited: false,
-          });
+          notifyDirectMessage(
+            {
+              id: dm.id,
+              channel_id: "",
+              author_id: dm.from_peer,
+              author_name: dm.from_display_name,
+              content: dm.content,
+              timestamp: dm.timestamp,
+              edited: false,
+            },
+            dm.from_peer,
+          );
         }
         break;
       }

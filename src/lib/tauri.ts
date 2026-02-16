@@ -267,6 +267,13 @@ export async function resetIdentity(): Promise<void> {
   return invoke("reset_identity");
 }
 
+export async function cacheAvatarIcon(
+  cacheKey: string,
+  svgContent: string,
+): Promise<string> {
+  return invoke("cache_avatar_icon", { cacheKey, svgContent });
+}
+
 // -- connectivity --
 
 export async function checkInternetConnectivity(): Promise<boolean> {

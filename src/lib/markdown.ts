@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { renderMentions } from "./mentions";
 
 // convert tiptap's json document tree to markdown-formatted text
 // preserves formatting marks as markdown syntax for the wire format
@@ -20,6 +21,13 @@ export function tiptapToMarkdown(doc: JSONContent): string {
 
 function textNodeToMarkdown(node: JSONContent): string {
   if (node.type === "hardBreak") return "\n";
+
+  // mention nodes serialize to the <@peer_id> wire format
+  if (node.type === "mention") {
+    const id = node.attrs?.id ?? "";
+    return `<@${id}>`;
+  }
+
   if (node.type !== "text" || !node.text) return "";
 
   let text = node.text;
@@ -120,6 +128,10 @@ export function renderMarkdown(text: string): string {
       html += `<code class="dusk-msg-code">${code}</code>`;
     } else {
       let s = escapeHtml(segment);
+
+      // mentions - resolve <@peer_id> tokens before other formatting
+      // runs on escaped html so matches &lt;@...&gt;
+      s = renderMentions(s);
 
       // bold + italic combined
       s = s.replace(

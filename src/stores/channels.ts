@@ -7,8 +7,39 @@ const [channels, setChannels] = createSignal<ChannelMeta[]>([]);
 const [categories, setCategories] = createSignal<CategoryMeta[]>([]);
 const [activeChannelId, setActiveChannelId] = createSignal<string | null>(null);
 
+// persists the last viewed channel per community across restarts
+const LAST_CHANNEL_KEY = "dusk-last-channels";
+
+function loadLastChannels(): Map<string, string> {
+  try {
+    const stored = localStorage.getItem(LAST_CHANNEL_KEY);
+    if (stored) return new Map(Object.entries(JSON.parse(stored)));
+  } catch {}
+  return new Map();
+}
+
+function saveLastChannels(map: Map<string, string>) {
+  localStorage.setItem(
+    LAST_CHANNEL_KEY,
+    JSON.stringify(Object.fromEntries(map)),
+  );
+}
+
+const lastChannelByCommunity = loadLastChannels();
+
 export function setActiveChannel(id: string | null) {
   setActiveChannelId(id);
+
+  // remember which channel was last viewed in this community
+  const communityId = activeCommunityId();
+  if (communityId && id) {
+    lastChannelByCommunity.set(communityId, id);
+    saveLastChannels(lastChannelByCommunity);
+  }
+}
+
+export function getLastChannel(communityId: string): string | null {
+  return lastChannelByCommunity.get(communityId) ?? null;
 }
 
 export function activeChannel(): ChannelMeta | undefined {
