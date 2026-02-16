@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 use tauri::State;
 
+use super::ipc_log;
 use crate::crdt::sync::{DocumentSnapshot, SyncMessage};
 use crate::node::gossip;
 use crate::node::NodeCommand;
@@ -100,74 +101,76 @@ pub async fn create_community(
     name: String,
     description: String,
 ) -> Result<CommunityMeta, String> {
-    let identity = state.identity.lock().await;
-    let id = identity.as_ref().ok_or("no identity loaded")?;
+    ipc_log!("create_community", {
+        let identity = state.identity.lock().await;
+        let id = identity.as_ref().ok_or("no identity loaded")?;
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
 
-    // generate a deterministic community id from name + creator + timestamp
-    let mut hasher = Sha256::new();
-    hasher.update(name.as_bytes());
-    hasher.update(id.peer_id.to_bytes());
-    hasher.update(now.to_le_bytes());
-    let hash = hasher.finalize();
-    let community_id = format!("com_{}", &hex::encode(hash)[..16]);
+        // generate a deterministic community id from name + creator + timestamp
+        let mut hasher = Sha256::new();
+        hasher.update(name.as_bytes());
+        hasher.update(id.peer_id.to_bytes());
+        hasher.update(now.to_le_bytes());
+        let hash = hasher.finalize();
+        let community_id = format!("com_{}", &hex::encode(hash)[..16]);
 
-    let peer_id_str = id.peer_id.to_string();
-    drop(identity);
+        let peer_id_str = id.peer_id.to_string();
+        drop(identity);
 
-    let mut engine = state.crdt_engine.lock().await;
-    engine.create_community(&community_id, &name, &description, &peer_id_str)?;
+        let mut engine = state.crdt_engine.lock().await;
+        engine.create_community(&community_id, &name, &description, &peer_id_str)?;
 
-    let meta = engine.get_community_meta(&community_id)?;
+        let meta = engine.get_community_meta(&community_id)?;
 
-    // save metadata cache
-    let _ = state.storage.save_community_meta(&meta);
-    drop(engine);
+        // save metadata cache
+        let _ = state.storage.save_community_meta(&meta);
+        drop(engine);
 
-    // subscribe to community topics on the p2p node
-    let node_handle = state.node_handle.lock().await;
-    if let Some(ref handle) = *node_handle {
-        let presence_topic = gossip::topic_for_presence(&community_id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::Subscribe {
-                topic: presence_topic,
-            })
-            .await;
+        // subscribe to community topics on the p2p node
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            let presence_topic = gossip::topic_for_presence(&community_id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Subscribe {
+                    topic: presence_topic,
+                })
+                .await;
 
-        // subscribe to the default general channel
-        let engine = state.crdt_engine.lock().await;
-        if let Ok(channels) = engine.get_channels(&community_id) {
-            for channel in &channels {
-                let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
-                let _ = handle
-                    .command_tx
-                    .send(NodeCommand::Subscribe { topic: msg_topic })
-                    .await;
+            // subscribe to the default general channel
+            let engine = state.crdt_engine.lock().await;
+            if let Ok(channels) = engine.get_channels(&community_id) {
+                for channel in &channels {
+                    let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
+                    let _ = handle
+                        .command_tx
+                        .send(NodeCommand::Subscribe { topic: msg_topic })
+                        .await;
 
-                let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
-                let _ = handle
-                    .command_tx
-                    .send(NodeCommand::Subscribe {
-                        topic: typing_topic,
-                    })
-                    .await;
+                    let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
+                    let _ = handle
+                        .command_tx
+                        .send(NodeCommand::Subscribe {
+                            topic: typing_topic,
+                        })
+                        .await;
+                }
             }
+
+            // register on rendezvous so peers joining via invite can discover us
+            let namespace = format!("dusk/community/{}", community_id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::RegisterRendezvous { namespace })
+                .await;
         }
 
-        // register on rendezvous so peers joining via invite can discover us
-        let namespace = format!("dusk/community/{}", community_id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::RegisterRendezvous { namespace })
-            .await;
-    }
-
-    Ok(meta)
+        Ok(meta)
+    })
 }
 
 #[tauri::command]
@@ -175,103 +178,105 @@ pub async fn join_community(
     state: State<'_, AppState>,
     invite_code: String,
 ) -> Result<CommunityMeta, String> {
-    let invite = crate::protocol::community::InviteCode::decode(&invite_code)?;
+    ipc_log!("join_community", {
+        let invite = crate::protocol::community::InviteCode::decode(&invite_code)?;
 
-    let local_peer_id = {
-        let identity = state.identity.lock().await;
-        let id = identity.as_ref().ok_or("no identity loaded")?;
-        id.peer_id.to_string()
-    };
+        let local_peer_id = {
+            let identity = state.identity.lock().await;
+            let id = identity.as_ref().ok_or("no identity loaded")?;
+            id.peer_id.to_string()
+        };
 
-    // create a placeholder document that will be backfilled via crdt sync
-    // once we connect to existing community members through the relay
-    let mut engine = state.crdt_engine.lock().await;
-    let had_existing_doc = engine.has_community(&invite.community_id);
-    if !had_existing_doc {
-        engine.create_placeholder_community(&invite.community_id, &invite.community_name, "")?;
-    }
+        // create a placeholder document that will be backfilled via crdt sync
+        // once we connect to existing community members through the relay
+        let mut engine = state.crdt_engine.lock().await;
+        let had_existing_doc = engine.has_community(&invite.community_id);
+        if !had_existing_doc {
+            engine.create_placeholder_community(&invite.community_id, &invite.community_name, "")?;
+        }
 
-    // joining via invite must never keep elevated local roles from stale local docs
-    if had_existing_doc {
-        if let Ok(members) = engine.get_members(&invite.community_id) {
-            let local_has_elevated_role = members.iter().any(|member| {
-                member.peer_id == local_peer_id
-                    && member
-                        .roles
-                        .iter()
-                        .any(|role| role == "owner" || role == "admin")
-            });
+        // joining via invite must never keep elevated local roles from stale local docs
+        if had_existing_doc {
+            if let Ok(members) = engine.get_members(&invite.community_id) {
+                let local_has_elevated_role = members.iter().any(|member| {
+                    member.peer_id == local_peer_id
+                        && member
+                            .roles
+                            .iter()
+                            .any(|role| role == "owner" || role == "admin")
+                });
 
-            if local_has_elevated_role {
-                let roles = vec!["member".to_string()];
-                let _ = engine.set_member_role(&invite.community_id, &local_peer_id, &roles);
+                if local_has_elevated_role {
+                    let roles = vec!["member".to_string()];
+                    let _ = engine.set_member_role(&invite.community_id, &local_peer_id, &roles);
+                }
             }
         }
-    }
 
-    let meta = engine.get_community_meta(&invite.community_id)?;
-    let _ = state.storage.save_community_meta(&meta);
+        let meta = engine.get_community_meta(&invite.community_id)?;
+        let _ = state.storage.save_community_meta(&meta);
 
-    // subscribe to gossipsub topics so we receive messages
-    let channels = engine
-        .get_channels(&invite.community_id)
-        .unwrap_or_default();
-    drop(engine);
+        // subscribe to gossipsub topics so we receive messages
+        let channels = engine
+            .get_channels(&invite.community_id)
+            .unwrap_or_default();
+        drop(engine);
 
-    // mark this community for one-time role hardening on first sync merge
-    {
-        let mut guard = state.pending_join_role_guard.lock().await;
-        guard.insert(invite.community_id.clone());
-    }
+        // mark this community for one-time role hardening on first sync merge
+        {
+            let mut guard = state.pending_join_role_guard.lock().await;
+            guard.insert(invite.community_id.clone());
+        }
 
-    let node_handle = state.node_handle.lock().await;
-    if let Some(ref handle) = *node_handle {
-        // subscribe to the community presence topic
-        let presence_topic = gossip::topic_for_presence(&invite.community_id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::Subscribe {
-                topic: presence_topic,
-            })
-            .await;
-
-        // subscribe to all channel topics
-        for channel in &channels {
-            let msg_topic = gossip::topic_for_messages(&invite.community_id, &channel.id);
-            let _ = handle
-                .command_tx
-                .send(NodeCommand::Subscribe { topic: msg_topic })
-                .await;
-
-            let typing_topic = gossip::topic_for_typing(&invite.community_id, &channel.id);
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            // subscribe to the community presence topic
+            let presence_topic = gossip::topic_for_presence(&invite.community_id);
             let _ = handle
                 .command_tx
                 .send(NodeCommand::Subscribe {
-                    topic: typing_topic,
+                    topic: presence_topic,
                 })
+                .await;
+
+            // subscribe to all channel topics
+            for channel in &channels {
+                let msg_topic = gossip::topic_for_messages(&invite.community_id, &channel.id);
+                let _ = handle
+                    .command_tx
+                    .send(NodeCommand::Subscribe { topic: msg_topic })
+                    .await;
+
+                let typing_topic = gossip::topic_for_typing(&invite.community_id, &channel.id);
+                let _ = handle
+                    .command_tx
+                    .send(NodeCommand::Subscribe {
+                        topic: typing_topic,
+                    })
+                    .await;
+            }
+
+            // register on rendezvous so existing members can find us
+            let namespace = format!("dusk/community/{}", invite.community_id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::RegisterRendezvous {
+                    namespace: namespace.clone(),
+                })
+                .await;
+
+            // discover existing members through rendezvous
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::DiscoverRendezvous { namespace })
                 .await;
         }
 
-        // register on rendezvous so existing members can find us
-        let namespace = format!("dusk/community/{}", invite.community_id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::RegisterRendezvous {
-                namespace: namespace.clone(),
-            })
-            .await;
+        // request a snapshot now so joins work even when peers were already connected
+        request_sync(&state).await;
 
-        // discover existing members through rendezvous
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::DiscoverRendezvous { namespace })
-            .await;
-    }
-
-    // request a snapshot now so joins work even when peers were already connected
-    request_sync(&state).await;
-
-    Ok(meta)
+        Ok(meta)
+    })
 }
 
 #[tauri::command]
@@ -279,90 +284,94 @@ pub async fn leave_community(
     state: State<'_, AppState>,
     community_id: String,
 ) -> Result<(), String> {
-    let local_peer_id = {
-        let identity = state.identity.lock().await;
-        let id = identity.as_ref().ok_or("no identity loaded")?;
-        id.peer_id.to_string()
-    };
+    ipc_log!("leave_community", {
+        let local_peer_id = {
+            let identity = state.identity.lock().await;
+            let id = identity.as_ref().ok_or("no identity loaded")?;
+            id.peer_id.to_string()
+        };
 
-    // remove local user from the shared member list before leaving
-    let mut removed_self = false;
-    let channels = {
-        let mut engine = state.crdt_engine.lock().await;
-        let channels = engine.get_channels(&community_id).unwrap_or_default();
+        // remove local user from the shared member list before leaving
+        let mut removed_self = false;
+        let channels = {
+            let mut engine = state.crdt_engine.lock().await;
+            let channels = engine.get_channels(&community_id).unwrap_or_default();
 
-        if let Ok(members) = engine.get_members(&community_id) {
-            if members.iter().any(|member| member.peer_id == local_peer_id) {
-                if engine.remove_member(&community_id, &local_peer_id).is_ok() {
-                    removed_self = true;
+            if let Ok(members) = engine.get_members(&community_id) {
+                if members.iter().any(|member| member.peer_id == local_peer_id) {
+                    if engine.remove_member(&community_id, &local_peer_id).is_ok() {
+                        removed_self = true;
+                    }
                 }
             }
+
+            channels
+        };
+
+        if removed_self {
+            broadcast_sync(&state, &community_id).await;
         }
 
-        channels
-    };
+        // unsubscribe from all community topics and stop advertising this namespace
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            for channel in &channels {
+                let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
+                let _ = handle
+                    .command_tx
+                    .send(NodeCommand::Unsubscribe { topic: msg_topic })
+                    .await;
 
-    if removed_self {
-        broadcast_sync(&state, &community_id).await;
-    }
+                let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
+                let _ = handle
+                    .command_tx
+                    .send(NodeCommand::Unsubscribe {
+                        topic: typing_topic,
+                    })
+                    .await;
+            }
 
-    // unsubscribe from all community topics and stop advertising this namespace
-    let node_handle = state.node_handle.lock().await;
-    if let Some(ref handle) = *node_handle {
-        for channel in &channels {
-            let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
-            let _ = handle
-                .command_tx
-                .send(NodeCommand::Unsubscribe { topic: msg_topic })
-                .await;
-
-            let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
+            let presence_topic = gossip::topic_for_presence(&community_id);
             let _ = handle
                 .command_tx
                 .send(NodeCommand::Unsubscribe {
-                    topic: typing_topic,
+                    topic: presence_topic,
                 })
+                .await;
+
+            let namespace = format!("dusk/community/{}", community_id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::UnregisterRendezvous { namespace })
                 .await;
         }
 
-        let presence_topic = gossip::topic_for_presence(&community_id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::Unsubscribe {
-                topic: presence_topic,
-            })
-            .await;
+        // remove local cached community state so leave persists across restarts
+        let mut engine = state.crdt_engine.lock().await;
+        engine.remove_community(&community_id)?;
+        drop(engine);
 
-        let namespace = format!("dusk/community/{}", community_id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::UnregisterRendezvous { namespace })
-            .await;
-    }
+        let mut guard = state.pending_join_role_guard.lock().await;
+        guard.remove(&community_id);
 
-    // remove local cached community state so leave persists across restarts
-    let mut engine = state.crdt_engine.lock().await;
-    engine.remove_community(&community_id)?;
-    drop(engine);
-
-    let mut guard = state.pending_join_role_guard.lock().await;
-    guard.remove(&community_id);
-
-    Ok(())
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn get_communities(state: State<'_, AppState>) -> Result<Vec<CommunityMeta>, String> {
-    let engine = state.crdt_engine.lock().await;
-    let mut communities = Vec::new();
+    ipc_log!("get_communities", {
+        let engine = state.crdt_engine.lock().await;
+        let mut communities = Vec::new();
 
-    for id in engine.community_ids() {
-        if let Ok(meta) = engine.get_community_meta(&id) {
-            communities.push(meta);
+        for id in engine.community_ids() {
+            if let Ok(meta) = engine.get_community_meta(&id) {
+                communities.push(meta);
+            }
         }
-    }
 
-    Ok(communities)
+        Ok(communities)
+    })
 }
 
 #[tauri::command]
@@ -374,57 +383,59 @@ pub async fn create_channel(
     kind: Option<String>,
     category_id: Option<String>,
 ) -> Result<ChannelMeta, String> {
-    let mut hasher = Sha256::new();
-    hasher.update(community_id.as_bytes());
-    hasher.update(name.as_bytes());
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    hasher.update(now.to_le_bytes());
-    let hash = hasher.finalize();
-    let channel_id = format!("ch_{}", &hex::encode(hash)[..12]);
+    ipc_log!("create_channel", {
+        let mut hasher = Sha256::new();
+        hasher.update(community_id.as_bytes());
+        hasher.update(name.as_bytes());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        hasher.update(now.to_le_bytes());
+        let hash = hasher.finalize();
+        let channel_id = format!("ch_{}", &hex::encode(hash)[..12]);
 
-    let channel_kind = match kind.as_deref() {
-        Some("voice") | Some("Voice") => ChannelKind::Voice,
-        _ => ChannelKind::Text,
-    };
+        let channel_kind = match kind.as_deref() {
+            Some("voice") | Some("Voice") => ChannelKind::Voice,
+            _ => ChannelKind::Text,
+        };
 
-    let channel = ChannelMeta {
-        id: channel_id,
-        community_id: community_id.clone(),
-        name,
-        topic,
-        kind: channel_kind,
-        position: 0,
-        category_id,
-    };
+        let channel = ChannelMeta {
+            id: channel_id,
+            community_id: community_id.clone(),
+            name,
+            topic,
+            kind: channel_kind,
+            position: 0,
+            category_id,
+        };
 
-    let mut engine = state.crdt_engine.lock().await;
-    engine.create_channel(&community_id, &channel)?;
-    drop(engine);
+        let mut engine = state.crdt_engine.lock().await;
+        engine.create_channel(&community_id, &channel)?;
+        drop(engine);
 
-    // subscribe to the new channel's topics
-    let node_handle = state.node_handle.lock().await;
-    if let Some(ref handle) = *node_handle {
-        let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::Subscribe { topic: msg_topic })
-            .await;
+        // subscribe to the new channel's topics
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Subscribe { topic: msg_topic })
+                .await;
 
-        let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::Subscribe {
-                topic: typing_topic,
-            })
-            .await;
-    }
+            let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Subscribe {
+                    topic: typing_topic,
+                })
+                .await;
+        }
 
-    broadcast_sync(&state, &community_id).await;
+        broadcast_sync(&state, &community_id).await;
 
-    Ok(channel)
+        Ok(channel)
+    })
 }
 
 #[tauri::command]
@@ -432,8 +443,10 @@ pub async fn get_channels(
     state: State<'_, AppState>,
     community_id: String,
 ) -> Result<Vec<ChannelMeta>, String> {
-    let engine = state.crdt_engine.lock().await;
-    engine.get_channels(&community_id)
+    ipc_log!("get_channels", {
+        let engine = state.crdt_engine.lock().await;
+        engine.get_channels(&community_id)
+    })
 }
 
 #[tauri::command]
@@ -442,31 +455,33 @@ pub async fn create_category(
     community_id: String,
     name: String,
 ) -> Result<CategoryMeta, String> {
-    let mut hasher = Sha256::new();
-    hasher.update(community_id.as_bytes());
-    hasher.update(name.as_bytes());
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    hasher.update(now.to_le_bytes());
-    let hash = hasher.finalize();
-    let category_id = format!("cat_{}", &hex::encode(hash)[..12]);
+    ipc_log!("create_category", {
+        let mut hasher = Sha256::new();
+        hasher.update(community_id.as_bytes());
+        hasher.update(name.as_bytes());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        hasher.update(now.to_le_bytes());
+        let hash = hasher.finalize();
+        let category_id = format!("cat_{}", &hex::encode(hash)[..12]);
 
-    let category = CategoryMeta {
-        id: category_id,
-        community_id: community_id.clone(),
-        name,
-        position: 0,
-    };
+        let category = CategoryMeta {
+            id: category_id,
+            community_id: community_id.clone(),
+            name,
+            position: 0,
+        };
 
-    let mut engine = state.crdt_engine.lock().await;
-    engine.create_category(&community_id, &category)?;
-    drop(engine);
+        let mut engine = state.crdt_engine.lock().await;
+        engine.create_category(&community_id, &category)?;
+        drop(engine);
 
-    broadcast_sync(&state, &community_id).await;
+        broadcast_sync(&state, &community_id).await;
 
-    Ok(category)
+        Ok(category)
+    })
 }
 
 #[tauri::command]

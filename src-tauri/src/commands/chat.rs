@@ -12,8 +12,11 @@ use crate::protocol::messages::{
 use crate::verification;
 use crate::AppState;
 
+use super::ipc_log;
+
 #[tauri::command]
 pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    ipc_log!("start_node", {
     let identity = state.identity.lock().await;
     let id = identity
         .as_ref()
@@ -205,10 +208,12 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
     }
 
     Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn stop_node(state: State<'_, AppState>) -> Result<(), String> {
+    ipc_log!("stop_node", {
     let mut node_handle = state.node_handle.lock().await;
 
     if let Some(handle) = node_handle.take() {
@@ -224,6 +229,7 @@ pub async fn stop_node(state: State<'_, AppState>) -> Result<(), String> {
     }
 
     Ok(())
+    })
 }
 
 #[tauri::command]
@@ -232,6 +238,7 @@ pub async fn send_message(
     channel_id: String,
     content: String,
 ) -> Result<ChatMessage, String> {
+    ipc_log!("send_message", {
     let identity = state.identity.lock().await;
     let id = identity.as_ref().ok_or("no identity loaded")?;
 
@@ -271,6 +278,7 @@ pub async fn send_message(
     }
 
     Ok(msg)
+    })
 }
 
 #[tauri::command]
@@ -280,13 +288,16 @@ pub async fn get_messages(
     before: Option<u64>,
     limit: Option<usize>,
 ) -> Result<Vec<ChatMessage>, String> {
+    ipc_log!("get_messages", {
     let engine = state.crdt_engine.lock().await;
     let community_id = find_community_for_channel(&engine, &channel_id)?;
     engine.get_messages(&community_id, &channel_id, before, limit.unwrap_or(50))
+    })
 }
 
 #[tauri::command]
 pub async fn send_typing(state: State<'_, AppState>, channel_id: String) -> Result<(), String> {
+    ipc_log!("send_typing", {
     let identity = state.identity.lock().await;
     let id = identity.as_ref().ok_or("no identity loaded")?;
 
@@ -318,11 +329,13 @@ pub async fn send_typing(state: State<'_, AppState>, channel_id: String) -> Resu
     }
 
     Ok(())
+    })
 }
 
 // broadcast current user status to all joined communities
 #[tauri::command]
 pub async fn broadcast_presence(state: State<'_, AppState>, status: String) -> Result<(), String> {
+    ipc_log!("broadcast_presence", {
     let peer_status = match status.as_str() {
         "online" => PeerStatus::Online,
         "idle" => PeerStatus::Idle,
@@ -343,6 +356,7 @@ pub async fn broadcast_presence(state: State<'_, AppState>, status: String) -> R
     }
 
     Ok(())
+    })
 }
 
 // find which community a channel belongs to by checking all loaded documents
@@ -367,6 +381,7 @@ fn find_community_for_channel(
 // between a general internet outage and the relay being unreachable
 #[tauri::command]
 pub async fn check_internet_connectivity() -> Result<bool, String> {
+    ipc_log!("check_internet_connectivity", {
     let hosts = vec![
         ("www.apple.com", 80),
         ("www.google.com", 80),
@@ -386,4 +401,5 @@ pub async fn check_internet_connectivity() -> Result<bool, String> {
     let results = futures::future::join_all(futures).await;
 
     Ok(results.iter().any(|r| matches!(r, Ok(Ok(_)))))
+    })
 }

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   PublicIdentity,
@@ -18,6 +18,42 @@ import type {
   DMSearchFilters,
   GifResponse,
 } from "./types";
+
+// wrapped invoke that logs all ipc calls and errors
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const startTime = performance.now();
+  const logPrefix = `[ipc] ${cmd}`;
+
+  // log the call with args (redacting sensitive data)
+  const safeArgs = args ? redactSensitiveArgs(args) : undefined;
+  console.log(`${logPrefix} called`, safeArgs ? { args: safeArgs } : "");
+
+  try {
+    const result = await tauriInvoke<T>(cmd, args);
+    const duration = (performance.now() - startTime).toFixed(2);
+    console.log(`${logPrefix} success (${duration}ms)`, result);
+    return result;
+  } catch (error) {
+    const duration = (performance.now() - startTime).toFixed(2);
+    console.error(`${logPrefix} error (${duration}ms)`, error);
+    throw error;
+  }
+}
+
+// redact potentially sensitive values from args before logging
+function redactSensitiveArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const sensitiveKeys = ["password", "secret", "token", "key", "credential", "private"];
+  const redacted = { ...args };
+
+  for (const key of Object.keys(redacted)) {
+    const lowerKey = key.toLowerCase();
+    if (sensitiveKeys.some((sk) => lowerKey.includes(sk))) {
+      redacted[key] = "[REDACTED]";
+    }
+  }
+
+  return redacted;
+}
 
 // -- identity --
 
