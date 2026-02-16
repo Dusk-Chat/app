@@ -60,13 +60,17 @@ fn score_timing_variance(segments: &[SegmentData]) -> f64 {
         return 0.0;
     }
 
-    let intervals: Vec<f64> = segments.iter().map(|s| s.click_time - s.start_time).collect();
+    let intervals: Vec<f64> = segments
+        .iter()
+        .map(|s| s.click_time - s.start_time)
+        .collect();
     let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
     if mean == 0.0 {
         return 0.0;
     }
 
-    let variance = intervals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / intervals.len() as f64;
+    let variance =
+        intervals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / intervals.len() as f64;
     let cv = variance.sqrt() / mean;
 
     // humans have natural variance in click timing
@@ -286,8 +290,8 @@ pub fn generate_proof(
     }
 
     // hash the raw challenge data to create a fingerprint
-    let challenge_bytes =
-        serde_json::to_vec(challenge).map_err(|e| format!("failed to serialize challenge: {}", e))?;
+    let challenge_bytes = serde_json::to_vec(challenge)
+        .map_err(|e| format!("failed to serialize challenge: {}", e))?;
     let mut hasher = Sha256::new();
     hasher.update(&challenge_bytes);
     let metrics_hash = hex::encode(hasher.finalize());
@@ -329,7 +333,10 @@ fn announcement_sign_payload(
     .into_bytes()
 }
 
-pub fn sign_announcement(keypair: &identity::Keypair, announcement: &ProfileAnnouncement) -> String {
+pub fn sign_announcement(
+    keypair: &identity::Keypair,
+    announcement: &ProfileAnnouncement,
+) -> String {
     let metrics_hash = announcement
         .verification_proof
         .as_ref()

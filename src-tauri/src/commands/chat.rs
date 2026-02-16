@@ -129,7 +129,13 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
             let namespace = format!("dusk/community/{}", community_id);
             let _ = handle
                 .command_tx
-                .send(NodeCommand::RegisterRendezvous { namespace })
+                .send(NodeCommand::RegisterRendezvous {
+                    namespace: namespace.clone(),
+                })
+                .await;
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::DiscoverRendezvous { namespace })
                 .await;
         }
 

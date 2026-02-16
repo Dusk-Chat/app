@@ -44,8 +44,7 @@ pub async fn join_voice_channel(
             display_name: display_name.clone(),
             media_state: media_state.clone(),
         };
-        let data =
-            serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
+        let data = serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage {
@@ -95,8 +94,7 @@ pub async fn leave_voice_channel(
             channel_id: channel_id.clone(),
             peer_id: peer_id.clone(),
         };
-        let data =
-            serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
+        let data = serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage {
@@ -108,9 +106,7 @@ pub async fn leave_voice_channel(
         // unsubscribe from the voice topic
         let _ = handle
             .command_tx
-            .send(NodeCommand::Unsubscribe {
-                topic: voice_topic,
-            })
+            .send(NodeCommand::Unsubscribe { topic: voice_topic })
             .await;
     }
 
@@ -151,8 +147,7 @@ pub async fn update_voice_media_state(
             peer_id: peer_id.clone(),
             media_state: media_state.clone(),
         };
-        let data =
-            serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
+        let data = serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage {
@@ -200,8 +195,7 @@ pub async fn send_voice_sdp(
             sdp_type,
             sdp,
         };
-        let data =
-            serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
+        let data = serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage {
@@ -241,8 +235,7 @@ pub async fn send_voice_ice_candidate(
             sdp_mid,
             sdp_mline_index,
         };
-        let data =
-            serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
+        let data = serde_json::to_vec(&msg).map_err(|e| format!("serialize error: {}", e))?;
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage {

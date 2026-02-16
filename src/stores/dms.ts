@@ -61,7 +61,12 @@ export function clearDMUnread(peerId: string) {
 }
 
 export function addDMMessage(message: DirectMessage) {
-  setDMMessages((prev) => [...prev, message]);
+  setDMMessages((prev) => mergeUniqueMessages([...prev, message]));
+}
+
+export function prependDMMessages(messages: DirectMessage[]) {
+  if (messages.length === 0) return;
+  setDMMessages((prev) => mergeUniqueMessages([...messages, ...prev]));
 }
 
 export function clearDMMessages() {
@@ -143,3 +148,16 @@ export {
   setDMConversations,
   setDMMessages,
 };
+
+function mergeUniqueMessages(messages: DirectMessage[]): DirectMessage[] {
+  const seen = new Set<string>();
+  const merged: DirectMessage[] = [];
+
+  for (const message of messages) {
+    if (seen.has(message.id)) continue;
+    seen.add(message.id);
+    merged.push(message);
+  }
+
+  return merged;
+}

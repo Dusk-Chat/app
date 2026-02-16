@@ -1,40 +1,60 @@
 import type { Component } from "solid-js";
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createMemo, createSignal, createEffect, on } from "solid-js";
 import { Phone, Pin, Search } from "lucide-solid";
 import {
   activeDMConversation,
   dmMessages,
   dmTypingPeers,
+  prependDMMessages,
   setDMMessages,
 } from "../../stores/dms";
 import { onlinePeerIds } from "../../stores/members";
 import { identity } from "../../stores/identity";
-import MessageList from "../chat/MessageList";
+import VirtualMessageList from "../chat/VirtualMessageList";
 import MessageInput from "../chat/MessageInput";
 import TypingIndicator from "../chat/TypingIndicator";
 import DMSearchPanel from "../chat/DMSearchPanel";
 import Avatar from "../common/Avatar";
 import IconButton from "../common/IconButton";
-import type { ChatMessage, DirectMessage } from "../../lib/types";
+import type { ChatMessage } from "../../lib/types";
+import * as tauri from "../../lib/tauri";
 
 interface DMChatAreaProps {
   onSendDM: (content: string) => void;
   onTyping: () => void;
 }
 
+const HISTORY_PAGE_SIZE = 80;
+const JUMP_WINDOW_SIZE = 500;
+
 const DMChatArea: Component<DMChatAreaProps> = (props) => {
   const [searchOpen, setSearchOpen] = createSignal(false);
+  const [focusMessageId, setFocusMessageId] = createSignal<string | null>(null);
+  const [loadingHistory, setLoadingHistory] = createSignal(false);
+  const [hasMoreHistory, setHasMoreHistory] = createSignal(true);
+
   const dm = () => activeDMConversation();
 
-  // adapt DirectMessage[] to ChatMessage[] so the existing MessageList works
+  createEffect(
+    on(
+      () => dm()?.peer_id,
+      () => {
+        setFocusMessageId(null);
+        setLoadingHistory(false);
+        setHasMoreHistory(true);
+      },
+    ),
+  );
+
+  // adapt direct messages to chat message shape so we can share rendering logic
   const adaptedMessages = createMemo((): ChatMessage[] =>
-    dmMessages().map((m) => ({
-      id: m.id,
-      channel_id: `dm_${m.from_peer === dm()?.peer_id ? m.from_peer : m.to_peer}`,
-      author_id: m.from_peer,
-      author_name: m.from_display_name,
-      content: m.content,
-      timestamp: m.timestamp,
+    dmMessages().map((message) => ({
+      id: message.id,
+      channel_id: `dm_${message.from_peer === dm()?.peer_id ? message.from_peer : message.to_peer}`,
+      author_id: message.from_peer,
+      author_name: message.from_display_name,
+      content: message.content,
+      timestamp: message.timestamp,
       edited: false,
     })),
   );
@@ -47,29 +67,75 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
     return "offline";
   });
 
-  // scroll to a message by id, loading full history into the store if needed
-  function handleJumpToMessage(
-    messageId: string,
-    allMessages: DirectMessage[],
-  ) {
-    const alreadyLoaded = dmMessages().some((m) => m.id === messageId);
+  function focusMessage(messageId: string) {
+    setFocusMessageId(null);
+    requestAnimationFrame(() => {
+      setFocusMessageId(messageId);
+    });
+  }
 
-    if (!alreadyLoaded) {
-      // replace the store with the full history so the target is in the dom
-      setDMMessages(allMessages);
+  async function loadOlderMessages() {
+    const peerId = dm()?.peer_id;
+    if (!peerId) return;
+    if (loadingHistory() || !hasMoreHistory()) return;
+
+    const currentMessages = dmMessages();
+    if (currentMessages.length === 0) return;
+
+    const oldestTimestamp = currentMessages[0].timestamp;
+
+    setLoadingHistory(true);
+    try {
+      const olderMessages = await tauri.getDMMessages(
+        peerId,
+        oldestTimestamp,
+        HISTORY_PAGE_SIZE,
+      );
+
+      if (olderMessages.length === 0) {
+        setHasMoreHistory(false);
+        return;
+      }
+
+      prependDMMessages(olderMessages);
+
+      if (olderMessages.length < HISTORY_PAGE_SIZE) {
+        setHasMoreHistory(false);
+      }
+    } catch (error) {
+      console.error("failed to load older dm messages:", error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  // scroll to a message by id and lazy-load a focused history window if needed
+  async function handleJumpToMessage(messageId: string, timestamp: number) {
+    const peerId = dm()?.peer_id;
+    if (!peerId) return;
+
+    const alreadyLoaded = dmMessages().some((message) => message.id === messageId);
+    if (alreadyLoaded) {
+      focusMessage(messageId);
+      return;
     }
 
-    // wait for the dom to update then scroll and highlight
-    requestAnimationFrame(() => {
-      const el = document.querySelector(
-        `[data-message-id="${messageId}"]`,
-      ) as HTMLElement | null;
-      if (!el) return;
+    try {
+      const aroundTarget = await tauri.getDMMessages(
+        peerId,
+        timestamp + 1,
+        JUMP_WINDOW_SIZE,
+      );
 
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("dusk-msg-search-highlight");
-      setTimeout(() => el.classList.remove("dusk-msg-search-highlight"), 2000);
-    });
+      if (aroundTarget.length > 0) {
+        setDMMessages(aroundTarget);
+        setHasMoreHistory(aroundTarget.length >= JUMP_WINDOW_SIZE);
+      }
+
+      focusMessage(messageId);
+    } catch (error) {
+      console.error("failed to jump to dm search result:", error);
+    }
   }
 
   // typing indicator names
@@ -78,7 +144,7 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
     if (typing.length === 0) return [];
     const peer = dm();
     if (!peer) return [];
-    // for dms there's only ever one person who can be typing
+    // for dms theres only ever one person who can be typing
     return typing.includes(peer.peer_id) ? [peer.display_name] : [];
   });
 
@@ -105,7 +171,7 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
             <IconButton
               label="Search messages"
               active={searchOpen()}
-              onClick={() => setSearchOpen((v) => !v)}
+              onClick={() => setSearchOpen((value) => !value)}
             >
               <Search size={18} />
             </IconButton>
@@ -123,7 +189,6 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
       <Show when={searchOpen() && dm()}>
         <DMSearchPanel
           peerId={dm()!.peer_id}
-          myPeerId={identity()?.peer_id ?? ""}
           peerName={dm()!.display_name}
           onClose={() => setSearchOpen(false)}
           onJumpToMessage={handleJumpToMessage}
@@ -148,7 +213,12 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
           </div>
         }
       >
-        <MessageList messages={adaptedMessages()} />
+        <VirtualMessageList
+          messages={adaptedMessages()}
+          conversationKey={dm()?.peer_id ?? ""}
+          focusMessageId={focusMessageId()}
+          onLoadMore={loadOlderMessages}
+        />
       </Show>
 
       {/* typing indicator */}

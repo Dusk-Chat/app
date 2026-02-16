@@ -141,6 +141,73 @@ const App: Component = () => {
   const [inviteCode, setInviteCode] = createSignal("");
   const [inviteLoading, setInviteLoading] = createSignal(false);
   const [inviteCopied, setInviteCopied] = createSignal(false);
+  let communityLoadSeq = 0;
+
+  async function hydrateCommunityState(
+    communityId: string,
+    preserveActiveChannel: boolean,
+    reloadMessagesOnStableChannel = false,
+  ) {
+    if (!tauriAvailable()) return;
+
+    const loadSeq = ++communityLoadSeq;
+
+    try {
+      const [chs, cats, mems] = await Promise.all([
+        tauri.getChannels(communityId),
+        tauri.getCategories(communityId),
+        tauri.getMembers(communityId),
+      ]);
+
+      if (loadSeq !== communityLoadSeq || activeCommunityId() !== communityId) {
+        return;
+      }
+
+      setChannels(chs);
+      setCategories(cats);
+      setMembers(mems);
+
+      const currentChannelId = activeChannelId();
+      const activeStillExists =
+        !!currentChannelId && chs.some((channel) => channel.id === currentChannelId);
+
+      let nextChannelId: string | null = null;
+      if (preserveActiveChannel && activeStillExists) {
+        nextChannelId = currentChannelId;
+      } else if (chs.length > 0) {
+        const last = getLastChannel(communityId);
+        const restored = !!last && chs.some((channel) => channel.id === last);
+        nextChannelId = restored ? last : chs[0].id;
+      }
+
+      if (nextChannelId !== currentChannelId) {
+        setActiveChannel(nextChannelId);
+        if (!nextChannelId) {
+          clearMessages();
+        }
+        return;
+      }
+
+      if (!nextChannelId) {
+        clearMessages();
+        return;
+      }
+
+      if (reloadMessagesOnStableChannel) {
+        const msgs = await tauri.getMessages(nextChannelId);
+        if (
+          loadSeq !== communityLoadSeq ||
+          activeCommunityId() !== communityId ||
+          activeChannelId() !== nextChannelId
+        ) {
+          return;
+        }
+        setMessages(msgs);
+      }
+    } catch (e) {
+      console.error("failed to hydrate community state:", e);
+    }
+  }
 
   // react to community switches by loading channels, members, and selecting first channel
   createEffect(
@@ -156,28 +223,7 @@ const App: Component = () => {
       }
 
       if (tauriAvailable()) {
-        try {
-          const [chs, cats] = await Promise.all([
-            tauri.getChannels(communityId),
-            tauri.getCategories(communityId),
-          ]);
-          setChannels(chs);
-          setCategories(cats);
-
-          if (chs.length > 0) {
-            const last = getLastChannel(communityId);
-            const restored = last && chs.some((c) => c.id === last);
-            setActiveChannel(restored ? last : chs[0].id);
-          } else {
-            setActiveChannel(null);
-            clearMessages();
-          }
-
-          const mems = await tauri.getMembers(communityId);
-          setMembers(mems);
-        } catch (e) {
-          console.error("failed to load community data:", e);
-        }
+        await hydrateCommunityState(communityId, false);
       }
     }),
   );
@@ -406,9 +452,7 @@ const App: Component = () => {
         // if the node itself has shut down (handled by stop_node command)
         break;
       case "sync_complete":
-        if (event.payload.community_id === activeCommunityId()) {
-          reloadCurrentChannel();
-        }
+        void handleSyncComplete(event.payload.community_id);
         break;
       case "profile_received":
         // update our local directory cache when a peer announces their profile
@@ -477,14 +521,18 @@ const App: Component = () => {
     }
   }
 
-  async function reloadCurrentChannel() {
-    const channelId = activeChannelId();
-    if (!channelId || !tauriAvailable()) return;
+  async function handleSyncComplete(communityId: string) {
+    if (!tauriAvailable()) return;
+
     try {
-      const msgs = await tauri.getMessages(channelId);
-      setMessages(msgs);
+      const allCommunities = await tauri.getCommunities();
+      setCommunities(allCommunities);
     } catch (e) {
-      console.error("failed to reload messages:", e);
+      console.error("failed to refresh communities after sync:", e);
+    }
+
+    if (communityId === activeCommunityId()) {
+      await hydrateCommunityState(communityId, true, true);
     }
   }
 

@@ -94,6 +94,10 @@ pub enum NodeCommand {
     DiscoverRendezvous {
         namespace: String,
     },
+    // unregister from a rendezvous namespace we no longer participate in
+    UnregisterRendezvous {
+        namespace: String,
+    },
     // send a gif search request to the relay peer via request-response
     GifSearch {
         request: crate::protocol::gif::GifRequest,
@@ -379,14 +383,50 @@ pub async fn start(
                                                 continue;
                                             }
 
-                                            match engine.merge_remote_doc(&snapshot.community_id, &snapshot.doc_bytes) {
+                                            let community_id = snapshot.community_id.clone();
+                                            let merge_result = engine.merge_remote_doc(&community_id, &snapshot.doc_bytes);
+                                            let channels_after_merge = if merge_result.is_ok() {
+                                                engine.get_channels(&community_id).unwrap_or_default()
+                                            } else {
+                                                Vec::new()
+                                            };
+                                            drop(engine);
+
+                                            match merge_result {
                                                 Ok(()) => {
+                                                    // keep topic subscriptions aligned with merged channels
+                                                    let presence_topic = libp2p::gossipsub::IdentTopic::new(
+                                                        gossip::topic_for_presence(&community_id),
+                                                    );
+                                                    let _ = swarm_instance
+                                                        .behaviour_mut()
+                                                        .gossipsub
+                                                        .subscribe(&presence_topic);
+
+                                                    for channel in &channels_after_merge {
+                                                        let messages_topic = libp2p::gossipsub::IdentTopic::new(
+                                                            gossip::topic_for_messages(&community_id, &channel.id),
+                                                        );
+                                                        let _ = swarm_instance
+                                                            .behaviour_mut()
+                                                            .gossipsub
+                                                            .subscribe(&messages_topic);
+
+                                                        let typing_topic = libp2p::gossipsub::IdentTopic::new(
+                                                            gossip::topic_for_typing(&community_id, &channel.id),
+                                                        );
+                                                        let _ = swarm_instance
+                                                            .behaviour_mut()
+                                                            .gossipsub
+                                                            .subscribe(&typing_topic);
+                                                    }
+
                                                     let _ = app_handle.emit("dusk-event", DuskEvent::SyncComplete {
-                                                        community_id: snapshot.community_id,
+                                                        community_id,
                                                     });
                                                 }
                                                 Err(e) => {
-                                                    log::warn!("failed to merge remote doc for {}: {}", snapshot.community_id, e);
+                                                    log::warn!("failed to merge remote doc for {}: {}", community_id, e);
                                                 }
                                             }
                                         }
@@ -1159,6 +1199,29 @@ pub async fn start(
                                     pending_queued_at = Some(std::time::Instant::now());
                                 }
                                 pending_discoveries.push(namespace);
+                            }
+                        }
+                        Some(NodeCommand::UnregisterRendezvous { namespace }) => {
+                            pending_registrations.retain(|ns| ns != &namespace);
+                            pending_discoveries.retain(|ns| ns != &namespace);
+                            if pending_registrations.is_empty() && pending_discoveries.is_empty() {
+                                pending_queued_at = None;
+                            }
+                            registered_namespaces.remove(&namespace);
+
+                            if relay_reservation_active {
+                                if let Some(rp) = relay_peer {
+                                    match libp2p::rendezvous::Namespace::new(namespace.clone()) {
+                                        Ok(ns) => {
+                                            swarm_instance.behaviour_mut().rendezvous.unregister(ns, rp);
+                                        }
+                                        Err(e) => log::warn!(
+                                            "invalid rendezvous namespace '{}': {:?}",
+                                            namespace,
+                                            e
+                                        ),
+                                    }
+                                }
                             }
                         }
                         Some(NodeCommand::GifSearch { request, reply }) => {

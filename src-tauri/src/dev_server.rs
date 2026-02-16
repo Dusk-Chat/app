@@ -19,6 +19,7 @@ use axum::Router;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
+use crate::crdt::sync::{DocumentSnapshot, SyncMessage};
 use crate::crdt::CrdtEngine;
 use crate::node::gossip;
 use crate::node::NodeCommand;
@@ -132,6 +133,67 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
+}
+
+// publish the latest document snapshot for a community to connected peers
+async fn broadcast_sync(state: &DevState, community_id: &str) {
+    let doc_bytes = {
+        let mut engine = state.crdt_engine.lock().await;
+        engine.get_doc_bytes(community_id)
+    };
+
+    let Some(doc_bytes) = doc_bytes else {
+        return;
+    };
+
+    let message = SyncMessage::DocumentOffer(DocumentSnapshot {
+        community_id: community_id.to_string(),
+        doc_bytes,
+    });
+
+    let data = match serde_json::to_vec(&message) {
+        Ok(data) => data,
+        Err(_) => return,
+    };
+
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::SendMessage {
+                topic: gossip::topic_for_sync(),
+                data,
+            })
+            .await;
+    }
+}
+
+// request snapshots from connected peers
+async fn request_sync(state: &DevState) {
+    let peer_id = {
+        let identity = state.identity.lock().await;
+        let Some(id) = identity.as_ref() else {
+            return;
+        };
+        id.peer_id.to_string()
+    };
+
+    let message = SyncMessage::RequestSync { peer_id };
+    let data = match serde_json::to_vec(&message) {
+        Ok(data) => data,
+        Err(_) => return,
+    };
+
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::SendMessage {
+                topic: gossip::topic_for_sync(),
+                data,
+            })
+            .await;
+    }
 }
 
 // find the community that owns a given channel
@@ -405,21 +467,18 @@ async fn join_community(
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
 
     let identity = state.identity.lock().await;
-    let id = identity
-        .as_ref()
-        .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "no identity loaded".into()))?;
-    let peer_id_str = id.peer_id.to_string();
+    if identity.is_none() {
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "no identity loaded".into(),
+        ));
+    }
     drop(identity);
 
     let mut engine = state.crdt_engine.lock().await;
     if !engine.has_community(&invite.community_id) {
         engine
-            .create_community(
-                &invite.community_id,
-                &invite.community_name,
-                "",
-                &peer_id_str,
-            )
+            .create_placeholder_community(&invite.community_id, &invite.community_name, "")
             .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     }
 
@@ -473,6 +532,8 @@ async fn join_community(
             .await;
     }
 
+    request_sync(&state).await;
+
     Ok(Json(meta))
 }
 
@@ -480,25 +541,50 @@ async fn leave_community(
     State(state): State<DevState>,
     Path(community_id): Path<String>,
 ) -> ApiResult<serde_json::Value> {
+    let local_peer_id = {
+        let identity = state.identity.lock().await;
+        let id = identity
+            .as_ref()
+            .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "no identity loaded".into()))?;
+        id.peer_id.to_string()
+    };
+
+    let mut removed_self = false;
+    let channels = {
+        let mut engine = state.crdt_engine.lock().await;
+        let channels = engine.get_channels(&community_id).unwrap_or_default();
+
+        if let Ok(members) = engine.get_members(&community_id) {
+            if members.iter().any(|member| member.peer_id == local_peer_id) {
+                if engine.remove_member(&community_id, &local_peer_id).is_ok() {
+                    removed_self = true;
+                }
+            }
+        }
+
+        channels
+    };
+
+    if removed_self {
+        broadcast_sync(&state, &community_id).await;
+    }
+
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
-        let engine = state.crdt_engine.lock().await;
-        if let Ok(channels) = engine.get_channels(&community_id) {
-            for channel in &channels {
-                let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
-                let _ = handle
-                    .command_tx
-                    .send(NodeCommand::Unsubscribe { topic: msg_topic })
-                    .await;
+        for channel in &channels {
+            let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Unsubscribe { topic: msg_topic })
+                .await;
 
-                let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
-                let _ = handle
-                    .command_tx
-                    .send(NodeCommand::Unsubscribe {
-                        topic: typing_topic,
-                    })
-                    .await;
-            }
+            let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Unsubscribe {
+                    topic: typing_topic,
+                })
+                .await;
         }
 
         let presence_topic = gossip::topic_for_presence(&community_id);
@@ -508,7 +594,18 @@ async fn leave_community(
                 topic: presence_topic,
             })
             .await;
+
+        let namespace = format!("dusk/community/{}", community_id);
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::UnregisterRendezvous { namespace })
+            .await;
     }
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine
+        .remove_community(&community_id)
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -630,6 +727,8 @@ async fn create_channel(
             })
             .await;
     }
+
+    broadcast_sync(&state, &community_id).await;
 
     Ok(Json(channel))
 }
@@ -1035,7 +1134,13 @@ async fn start_node(State(state): State<DevState>) -> ApiResult<serde_json::Valu
         let namespace = format!("dusk/community/{}", community_id);
         let _ = handle
             .command_tx
-            .send(NodeCommand::RegisterRendezvous { namespace })
+            .send(NodeCommand::RegisterRendezvous {
+                namespace: namespace.clone(),
+            })
+            .await;
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::DiscoverRendezvous { namespace })
             .await;
     }
 

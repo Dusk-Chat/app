@@ -7,6 +7,7 @@ use crate::node::NodeCommand;
 use crate::protocol::messages::{
     DMConversationMeta, DMTypingIndicator, DirectMessage, GossipMessage,
 };
+use crate::storage::DmSearchParams;
 use crate::AppState;
 
 // send a direct message to a peer
@@ -136,6 +137,48 @@ pub async fn get_dm_messages(
         .storage
         .load_dm_messages(&conversation_id, before, limit.unwrap_or(50))
         .map_err(|e| format!("failed to load dm messages: {}", e))
+}
+
+// search dm messages on the backend using sqlite indexes
+#[tauri::command]
+pub async fn search_dm_messages(
+    state: State<'_, AppState>,
+    peer_id: String,
+    query: Option<String>,
+    from_filter: Option<String>,
+    media_filter: Option<String>,
+    mentions_only: Option<bool>,
+    date_after: Option<u64>,
+    date_before: Option<u64>,
+    limit: Option<usize>,
+) -> Result<Vec<DirectMessage>, String> {
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let local_peer_id = id.peer_id.to_string();
+    drop(identity);
+
+    let conversation_id = gossip::dm_conversation_id(&local_peer_id, &peer_id);
+
+    let from_peer = match from_filter.as_deref() {
+        Some("me") => Some(local_peer_id),
+        Some("them") => Some(peer_id.clone()),
+        _ => None,
+    };
+
+    let params = DmSearchParams {
+        query,
+        from_peer,
+        media_filter,
+        mentions_only: mentions_only.unwrap_or(false),
+        date_after,
+        date_before,
+        limit: limit.unwrap_or(200),
+    };
+
+    state
+        .storage
+        .search_dm_messages(&conversation_id, &params)
+        .map_err(|e| format!("failed to search dm messages: {}", e))
 }
 
 // load all dm conversations for the sidebar

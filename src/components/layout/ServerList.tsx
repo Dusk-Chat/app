@@ -6,28 +6,38 @@ import {
   activeCommunityId,
   setActiveCommunity,
 } from "../../stores/communities";
-import { setActiveDM } from "../../stores/dms";
+import { dmConversations, setActiveDM } from "../../stores/dms";
 import { getInitials, hashColor } from "../../lib/utils";
 import { openModal } from "../../stores/ui";
 
 const ServerList: Component = () => {
+  const unreadDMCount = () =>
+    dmConversations().reduce((total, dm) => total + dm.unread_count, 0);
+
   return (
     <div class="w-16 shrink-0 border-r bg-black flex flex-col items-center py-3 gap-2 overflow-y-auto no-select">
       {/* home button */}
-      <button
-        type="button"
-        class={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
-          activeCommunityId() === null
-            ? "bg-orange text-white"
-            : "bg-gray-800 text-white/60 hover:bg-gray-800 hover:text-white hover:scale-105"
-        }`}
-        onClick={() => {
-          setActiveCommunity(null);
-          setActiveDM(null);
-        }}
-      >
-        <Home size={24} />
-      </button>
+      <div class="relative">
+        <button
+          type="button"
+          class={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
+            activeCommunityId() === null
+              ? "bg-orange text-white"
+              : "bg-gray-800 text-white/60 hover:bg-gray-800 hover:text-white hover:scale-105"
+          }`}
+          onClick={() => {
+            setActiveCommunity(null);
+            setActiveDM(null);
+          }}
+        >
+          <Home size={24} />
+        </button>
+        <Show when={unreadDMCount() > 0}>
+          <div class="absolute -top-1 -right-1 min-w-5 h-5 px-1 bg-orange text-white text-[11px] leading-none font-bold flex items-center justify-center rounded-full">
+            {unreadDMCount() > 99 ? "99+" : unreadDMCount()}
+          </div>
+        </Show>
+      </div>
 
       <div class="w-8 border-t border-white/20 my-1" />
 

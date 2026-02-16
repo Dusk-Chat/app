@@ -125,6 +125,19 @@ export interface DMConversationMeta {
   unread_count: number;
 }
 
+export type DMSearchFrom = "anyone" | "me" | "them";
+export type DMSearchMedia = "images" | "videos" | "links" | "files";
+
+export interface DMSearchFilters {
+  query?: string;
+  from_filter?: DMSearchFrom;
+  media_filter?: DMSearchMedia | null;
+  mentions_only?: boolean;
+  date_after?: number | null;
+  date_before?: number | null;
+  limit?: number;
+}
+
 export interface Member {
   peer_id: string;
   display_name: string;

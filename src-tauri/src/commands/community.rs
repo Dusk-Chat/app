@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 use tauri::State;
 
+use crate::crdt::sync::{DocumentSnapshot, SyncMessage};
 use crate::node::gossip;
 use crate::node::NodeCommand;
 use crate::protocol::community::{CategoryMeta, ChannelKind, ChannelMeta, CommunityMeta, Member};
@@ -34,14 +35,60 @@ fn check_permission(
 
 // helper to broadcast a crdt change to peers via the sync topic
 async fn broadcast_sync(state: &State<'_, AppState>, community_id: &str) {
+    let doc_bytes = {
+        let mut engine = state.crdt_engine.lock().await;
+        engine.get_doc_bytes(community_id)
+    };
+
+    let Some(doc_bytes) = doc_bytes else {
+        return;
+    };
+
+    let sync_msg = SyncMessage::DocumentOffer(DocumentSnapshot {
+        community_id: community_id.to_string(),
+        doc_bytes,
+    });
+
+    let data = match serde_json::to_vec(&sync_msg) {
+        Ok(data) => data,
+        Err(_) => return,
+    };
+
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
-        let sync_topic = "dusk/sync".to_string();
         let _ = handle
             .command_tx
             .send(NodeCommand::SendMessage {
-                topic: sync_topic,
-                data: community_id.as_bytes().to_vec(),
+                topic: gossip::topic_for_sync(),
+                data,
+            })
+            .await;
+    }
+}
+
+// request a full sync from currently connected peers
+async fn request_sync(state: &State<'_, AppState>) {
+    let peer_id = {
+        let identity = state.identity.lock().await;
+        let Some(id) = identity.as_ref() else {
+            return;
+        };
+        id.peer_id.to_string()
+    };
+
+    let sync_msg = SyncMessage::RequestSync { peer_id };
+    let data = match serde_json::to_vec(&sync_msg) {
+        Ok(data) => data,
+        Err(_) => return,
+    };
+
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::SendMessage {
+                topic: gossip::topic_for_sync(),
+                data,
             })
             .await;
     }
@@ -131,20 +178,16 @@ pub async fn join_community(
     let invite = crate::protocol::community::InviteCode::decode(&invite_code)?;
 
     let identity = state.identity.lock().await;
-    let id = identity.as_ref().ok_or("no identity loaded")?;
-    let peer_id_str = id.peer_id.to_string();
+    if identity.is_none() {
+        return Err("no identity loaded".to_string());
+    }
     drop(identity);
 
     // create a placeholder document that will be backfilled via crdt sync
     // once we connect to existing community members through the relay
     let mut engine = state.crdt_engine.lock().await;
     if !engine.has_community(&invite.community_id) {
-        engine.create_community(
-            &invite.community_id,
-            &invite.community_name,
-            "",
-            &peer_id_str,
-        )?;
+        engine.create_placeholder_community(&invite.community_id, &invite.community_name, "")?;
     }
 
     let meta = engine.get_community_meta(&invite.community_id)?;
@@ -200,6 +243,9 @@ pub async fn join_community(
             .await;
     }
 
+    // request a snapshot now so joins work even when peers were already connected
+    request_sync(&state).await;
+
     Ok(meta)
 }
 
@@ -208,26 +254,50 @@ pub async fn leave_community(
     state: State<'_, AppState>,
     community_id: String,
 ) -> Result<(), String> {
-    // unsubscribe from all community topics
+    let local_peer_id = {
+        let identity = state.identity.lock().await;
+        let id = identity.as_ref().ok_or("no identity loaded")?;
+        id.peer_id.to_string()
+    };
+
+    // remove local user from the shared member list before leaving
+    let mut removed_self = false;
+    let channels = {
+        let mut engine = state.crdt_engine.lock().await;
+        let channels = engine.get_channels(&community_id).unwrap_or_default();
+
+        if let Ok(members) = engine.get_members(&community_id) {
+            if members.iter().any(|member| member.peer_id == local_peer_id) {
+                if engine.remove_member(&community_id, &local_peer_id).is_ok() {
+                    removed_self = true;
+                }
+            }
+        }
+
+        channels
+    };
+
+    if removed_self {
+        broadcast_sync(&state, &community_id).await;
+    }
+
+    // unsubscribe from all community topics and stop advertising this namespace
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
-        let engine = state.crdt_engine.lock().await;
-        if let Ok(channels) = engine.get_channels(&community_id) {
-            for channel in &channels {
-                let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
-                let _ = handle
-                    .command_tx
-                    .send(NodeCommand::Unsubscribe { topic: msg_topic })
-                    .await;
+        for channel in &channels {
+            let msg_topic = gossip::topic_for_messages(&community_id, &channel.id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Unsubscribe { topic: msg_topic })
+                .await;
 
-                let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
-                let _ = handle
-                    .command_tx
-                    .send(NodeCommand::Unsubscribe {
-                        topic: typing_topic,
-                    })
-                    .await;
-            }
+            let typing_topic = gossip::topic_for_typing(&community_id, &channel.id);
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::Unsubscribe {
+                    topic: typing_topic,
+                })
+                .await;
         }
 
         let presence_topic = gossip::topic_for_presence(&community_id);
@@ -237,7 +307,17 @@ pub async fn leave_community(
                 topic: presence_topic,
             })
             .await;
+
+        let namespace = format!("dusk/community/{}", community_id);
+        let _ = handle
+            .command_tx
+            .send(NodeCommand::UnregisterRendezvous { namespace })
+            .await;
     }
+
+    // remove local cached community state so leave persists across restarts
+    let mut engine = state.crdt_engine.lock().await;
+    engine.remove_community(&community_id)?;
 
     Ok(())
 }
@@ -313,6 +393,8 @@ pub async fn create_channel(
             .await;
     }
 
+    broadcast_sync(&state, &community_id).await;
+
     Ok(channel)
 }
 
@@ -353,18 +435,7 @@ pub async fn create_category(
     engine.create_category(&community_id, &category)?;
     drop(engine);
 
-    // broadcast the change via document sync
-    let node_handle = state.node_handle.lock().await;
-    if let Some(ref handle) = *node_handle {
-        let sync_topic = "dusk/sync".to_string();
-        let _ = handle
-            .command_tx
-            .send(NodeCommand::SendMessage {
-                topic: sync_topic,
-                data: community_id.as_bytes().to_vec(),
-            })
-            .await;
-    }
+    broadcast_sync(&state, &community_id).await;
 
     Ok(category)
 }

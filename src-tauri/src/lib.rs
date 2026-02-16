@@ -147,6 +147,7 @@ pub fn run() {
             commands::voice::get_voice_participants,
             commands::dm::send_dm,
             commands::dm::get_dm_messages,
+            commands::dm::search_dm_messages,
             commands::dm::get_dm_conversations,
             commands::dm::mark_dm_read,
             commands::dm::delete_dm_conversation,

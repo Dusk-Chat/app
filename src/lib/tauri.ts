@@ -15,6 +15,7 @@ import type {
   VoiceMediaState,
   DirectMessage,
   DMConversationMeta,
+  DMSearchFilters,
   GifResponse,
 } from "./types";
 
@@ -372,6 +373,22 @@ export async function getDMMessages(
   limit?: number,
 ): Promise<DirectMessage[]> {
   return invoke("get_dm_messages", { peerId, before, limit });
+}
+
+export async function searchDMMessages(
+  peerId: string,
+  filters: DMSearchFilters,
+): Promise<DirectMessage[]> {
+  return invoke("search_dm_messages", {
+    peerId,
+    query: filters.query,
+    fromFilter: filters.from_filter,
+    mediaFilter: filters.media_filter,
+    mentionsOnly: filters.mentions_only,
+    dateAfter: filters.date_after,
+    dateBefore: filters.date_before,
+    limit: filters.limit,
+  });
 }
 
 export async function getDMConversations(): Promise<DMConversationMeta[]> {

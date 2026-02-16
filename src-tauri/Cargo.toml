@@ -52,6 +52,7 @@ hex = "0.4"
 
 # data storage
 directories = "5"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # env file support
 dotenvy = "0.15"

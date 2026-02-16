@@ -8,7 +8,16 @@ const [activeCommunityId, setActiveCommunityId] = createSignal<string | null>(
 );
 
 export function addCommunity(community: CommunityMeta) {
-  setCommunities((prev) => [...prev, community]);
+  setCommunities((prev) => {
+    const existingIndex = prev.findIndex((item) => item.id === community.id);
+    if (existingIndex === -1) {
+      return [...prev, community];
+    }
+
+    const next = [...prev];
+    next[existingIndex] = community;
+    return next;
+  });
 }
 
 export function removeCommunity(id: string) {

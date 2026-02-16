@@ -50,6 +50,32 @@ pub fn init_community_doc(
     Ok(())
 }
 
+// initialize a placeholder community document used while waiting for remote sync
+// this avoids granting local owner role or creating channels that may conflict
+pub fn init_placeholder_community_doc(
+    doc: &mut AutoCommit,
+    name: &str,
+    description: &str,
+) -> Result<(), automerge::AutomergeError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let meta = doc.put_object(ROOT, "meta", ObjType::Map)?;
+    doc.put(&meta, "name", name)?;
+    doc.put(&meta, "description", description)?;
+    doc.put(&meta, "created_by", "")?;
+    doc.put(&meta, "created_at", now as i64)?;
+
+    let _channels = doc.put_object(ROOT, "channels", ObjType::Map)?;
+    let _categories = doc.put_object(ROOT, "categories", ObjType::Map)?;
+    let _members = doc.put_object(ROOT, "members", ObjType::Map)?;
+    let _roles = doc.put_object(ROOT, "roles", ObjType::Map)?;
+
+    Ok(())
+}
+
 // add a new channel to the community document
 pub fn add_channel(
     doc: &mut AutoCommit,

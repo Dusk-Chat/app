@@ -323,7 +323,10 @@ pub async fn set_relay_address(
     {
         let mut node_handle = state.node_handle.lock().await;
         if let Some(handle) = node_handle.take() {
-            let _ = handle.command_tx.send(crate::node::NodeCommand::Shutdown).await;
+            let _ = handle
+                .command_tx
+                .send(crate::node::NodeCommand::Shutdown)
+                .await;
             let _ = handle.task.await;
         }
     }
@@ -409,10 +412,7 @@ pub async fn reset_identity(state: State<'_, AppState>) -> Result<(), String> {
 // write an svg string to a cache directory and return the absolute path
 // used for notification icons so the os can display the user's avatar
 #[tauri::command]
-pub async fn cache_avatar_icon(
-    cache_key: String,
-    svg_content: String,
-) -> Result<String, String> {
+pub async fn cache_avatar_icon(cache_key: String, svg_content: String) -> Result<String, String> {
     let cache_dir = std::env::temp_dir().join("dusk-avatars");
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("failed to create avatar cache dir: {}", e))?;

@@ -64,6 +64,22 @@ impl CrdtEngine {
         Ok(())
     }
 
+    // create a minimal community document while waiting for remote sync
+    pub fn create_placeholder_community(
+        &mut self,
+        community_id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<(), String> {
+        let mut doc = AutoCommit::new();
+        document::init_placeholder_community_doc(&mut doc, name, description)
+            .map_err(|e| format!("failed to init placeholder community doc: {}", e))?;
+
+        self.documents.insert(community_id.to_string(), doc);
+        self.persist(community_id)?;
+        Ok(())
+    }
+
     // add a channel to an existing community
     pub fn create_channel(
         &mut self,
@@ -187,6 +203,18 @@ impl CrdtEngine {
     // check if we have a document for a community
     pub fn has_community(&self, community_id: &str) -> bool {
         self.documents.contains_key(community_id)
+    }
+
+    // fully remove a community from memory and disk
+    pub fn remove_community(&mut self, community_id: &str) -> Result<(), String> {
+        self.documents.remove(community_id);
+        self.storage
+            .delete_document(community_id)
+            .map_err(|e| format!("failed to delete community document: {}", e))?;
+        self.storage
+            .delete_community_meta(community_id)
+            .map_err(|e| format!("failed to delete community meta: {}", e))?;
+        Ok(())
     }
 
     // save a document to disk
@@ -350,11 +378,7 @@ impl CrdtEngine {
     }
 
     // remove a category and ungroup its channels
-    pub fn delete_category(
-        &mut self,
-        community_id: &str,
-        category_id: &str,
-    ) -> Result<(), String> {
+    pub fn delete_category(&mut self, community_id: &str, category_id: &str) -> Result<(), String> {
         let doc = self
             .documents
             .get_mut(community_id)

@@ -1,5 +1,13 @@
 import type { Component } from "solid-js";
-import { createSignal, createMemo, onMount, Show, For } from "solid-js";
+import {
+  createSignal,
+  createMemo,
+  createEffect,
+  onCleanup,
+  onMount,
+  Show,
+  For,
+} from "solid-js";
 import {
   Search,
   X,
@@ -13,76 +21,54 @@ import {
   ChevronUp,
   Loader2,
 } from "lucide-solid";
-import type { ChatMessage, DirectMessage } from "../../lib/types";
+import type {
+  DMSearchFrom,
+  DMSearchMedia,
+  DirectMessage,
+} from "../../lib/types";
 import { formatTime, formatDaySeparator } from "../../lib/utils";
-import { extractMentions } from "../../lib/mentions";
 import * as tauri from "../../lib/tauri";
 
-// regex patterns for detecting media in message content
-const IMAGE_REGEX = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)(\?[^\s]*)?$/i;
-const VIDEO_REGEX = /\.(mp4|webm|mov|avi|mkv)(\?[^\s]*)?$/i;
-const LINK_REGEX = /https?:\/\/[^\s]+/i;
-const FILE_REGEX = /\.(pdf|doc|docx|xls|xlsx|zip|rar|7z|tar|gz)(\?[^\s]*)?$/i;
-
-// upper bound so we pull the entire conversation from disk
-const ALL_MESSAGES_LIMIT = 1_000_000;
-
-type MediaFilter = "images" | "videos" | "links" | "files";
-type FilterFrom = "anyone" | "me" | "them";
+const SEARCH_LIMIT = 300;
+const RESULT_ROW_HEIGHT = 56;
+const RESULT_OVERSCAN = 6;
 
 interface DMSearchPanelProps {
   peerId: string;
-  myPeerId: string;
   peerName: string;
   onClose: () => void;
-  onJumpToMessage: (messageId: string, allMessages: DirectMessage[]) => void;
+  onJumpToMessage: (messageId: string, timestamp: number) => void;
 }
 
 const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
   const [query, setQuery] = createSignal("");
-  const [fromFilter, setFromFilter] = createSignal<FilterFrom>("anyone");
-  const [mediaFilter, setMediaFilter] = createSignal<MediaFilter | null>(null);
+  const [fromFilter, setFromFilter] = createSignal<DMSearchFrom>("anyone");
+  const [mediaFilter, setMediaFilter] = createSignal<DMSearchMedia | null>(null);
   const [mentionsOnly, setMentionsOnly] = createSignal(false);
   const [dateAfter, setDateAfter] = createSignal<string>("");
   const [dateBefore, setDateBefore] = createSignal<string>("");
   const [showFilters, setShowFilters] = createSignal(false);
-
-  // full conversation loaded from disk for searching
-  const [allMessages, setAllMessages] = createSignal<DirectMessage[]>([]);
-  const [loading, setLoading] = createSignal(true);
+  const [results, setResults] = createSignal<DirectMessage[]>([]);
+  const [loading, setLoading] = createSignal(false);
+  const [resultScrollTop, setResultScrollTop] = createSignal(0);
+  const [resultViewportHeight, setResultViewportHeight] = createSignal(320);
 
   let inputRef: HTMLInputElement | undefined;
+  let resultsRef: HTMLDivElement | undefined;
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let activeSearchId = 0;
 
-  // load entire conversation history from disk on mount
-  onMount(async () => {
-    try {
-      const msgs = await tauri.getDMMessages(
-        props.peerId,
-        undefined,
-        ALL_MESSAGES_LIMIT,
-      );
-      setAllMessages(msgs);
-    } catch (e) {
-      console.error("failed to load all dm messages for search:", e);
-    } finally {
-      setLoading(false);
-      // focus after loading completes
-      inputRef?.focus();
-    }
+  // focus the search field when the panel opens
+  onMount(() => {
+    inputRef?.focus();
   });
 
-  // adapt DirectMessage[] to a searchable shape
-  const searchableMessages = createMemo((): ChatMessage[] =>
-    allMessages().map((m) => ({
-      id: m.id,
-      channel_id: `dm_${props.peerId}`,
-      author_id: m.from_peer,
-      author_name: m.from_display_name,
-      content: m.content,
-      timestamp: m.timestamp,
-      edited: false,
-    })),
-  );
+  onCleanup(() => {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+    }
+    activeSearchId += 1;
+  });
 
   const hasActiveFilters = createMemo(() => {
     return (
@@ -94,49 +80,96 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
     );
   });
 
-  const filteredMessages = createMemo(() => {
-    const q = query().toLowerCase().trim();
+  createEffect(() => {
+    const textQuery = query().trim();
     const from = fromFilter();
     const media = mediaFilter();
     const mentions = mentionsOnly();
     const after = dateAfter();
     const before = dateBefore();
+    const hasFilters = hasActiveFilters();
 
-    // no search or filters active, return nothing
-    if (!q && !hasActiveFilters()) return [];
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = undefined;
+    }
 
-    const afterTs = after ? new Date(after).getTime() : null;
-    const beforeTs = before
-      ? new Date(before).getTime() + 86_400_000
-      : null;
+    if (!textQuery && !hasFilters) {
+      setLoading(false);
+      setResults([]);
+      return;
+    }
 
-    return searchableMessages().filter((msg) => {
-      // text query
-      if (q && !msg.content.toLowerCase().includes(q)) return false;
+    const searchId = ++activeSearchId;
+    setLoading(true);
 
-      // from filter
-      if (from === "me" && msg.author_id !== props.myPeerId) return false;
-      if (from === "them" && msg.author_id === props.myPeerId) return false;
+    searchDebounceTimer = setTimeout(async () => {
+      const dateAfterTs = after ? new Date(after).getTime() : null;
+      const dateBeforeTs = before
+        ? new Date(before).getTime() + 86_399_999
+        : null;
 
-      // date range
-      if (afterTs && msg.timestamp < afterTs) return false;
-      if (beforeTs && msg.timestamp > beforeTs) return false;
+      try {
+        const nextResults = await tauri.searchDMMessages(props.peerId, {
+          query: textQuery || undefined,
+          from_filter: from,
+          media_filter: media,
+          mentions_only: mentions,
+          date_after: dateAfterTs,
+          date_before: dateBeforeTs,
+          limit: SEARCH_LIMIT,
+        });
 
-      // media type
-      if (media) {
-        const content = msg.content.trim();
-        if (media === "images" && !IMAGE_REGEX.test(content)) return false;
-        if (media === "videos" && !VIDEO_REGEX.test(content)) return false;
-        if (media === "links" && !LINK_REGEX.test(content)) return false;
-        if (media === "files" && !FILE_REGEX.test(content)) return false;
+        if (searchId !== activeSearchId) return;
+
+        setResultScrollTop(0);
+        if (resultsRef) {
+          resultsRef.scrollTop = 0;
+          setResultViewportHeight(resultsRef.clientHeight || 320);
+        }
+        setResults(nextResults);
+      } catch (error) {
+        if (searchId !== activeSearchId) return;
+        console.error("failed to search dm messages:", error);
+        setResults([]);
+      } finally {
+        if (searchId === activeSearchId) {
+          setLoading(false);
+        }
       }
-
-      // mentions only
-      if (mentions && extractMentions(msg.content).length === 0) return false;
-
-      return true;
-    });
+    }, 120);
   });
+
+  const totalResultHeight = createMemo(
+    () => results().length * RESULT_ROW_HEIGHT,
+  );
+
+  const visibleResults = createMemo(() => {
+    const rows = results();
+    const viewport = resultViewportHeight();
+    const scrollTop = resultScrollTop();
+
+    const startIndex = Math.max(
+      0,
+      Math.floor(scrollTop / RESULT_ROW_HEIGHT) - RESULT_OVERSCAN,
+    );
+    const endIndex = Math.min(
+      rows.length,
+      Math.ceil((scrollTop + viewport) / RESULT_ROW_HEIGHT) + RESULT_OVERSCAN,
+    );
+
+    const slice = rows.slice(startIndex, endIndex);
+    return slice.map((message, index) => ({
+      message,
+      index: startIndex + index,
+    }));
+  });
+
+  function handleResultScroll() {
+    if (!resultsRef) return;
+    setResultScrollTop(resultsRef.scrollTop);
+    setResultViewportHeight(resultsRef.clientHeight || 320);
+  }
 
   function clearAllFilters() {
     setQuery("");
@@ -147,24 +180,20 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
     setDateBefore("");
   }
 
-  function handleJump(messageId: string) {
-    props.onJumpToMessage(messageId, allMessages());
+  function handleJump(message: DirectMessage) {
+    props.onJumpToMessage(message.id, message.timestamp);
   }
 
   // highlight matching text in a result snippet
   function highlightMatch(text: string): string {
-    const q = query().trim();
-    if (!q) return escapeHtml(truncate(text, 120));
+    const textQuery = query().trim();
+    if (!textQuery) return escapeHtml(truncate(text, 120));
 
     const escaped = escapeHtml(truncate(text, 120));
-    const regex = new RegExp(
-      `(${escapeRegex(escapeHtml(q))})`,
-      "gi",
-    );
-    return escaped.replace(
-      regex,
-      '<span class="text-orange font-medium">$1</span>',
-    );
+    const escapedQuery = escapeRegex(escapeHtml(textQuery));
+    const regex = new RegExp(`(${escapedQuery})`, "gi");
+
+    return escaped.replace(regex, '<span class="text-orange font-medium">$1</span>');
   }
 
   return (
@@ -179,30 +208,33 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
         >
           <Search size={16} class="shrink-0 text-white/40" />
         </Show>
+
         <input
           ref={inputRef}
           type="text"
-          placeholder={loading() ? "loading messages..." : "search messages..."}
+          placeholder={loading() ? "searching..." : "search messages..."}
           value={query()}
-          onInput={(e) => setQuery(e.currentTarget.value)}
-          disabled={loading()}
-          class="flex-1 bg-transparent text-[14px] text-white placeholder:text-white/30 outline-none disabled:opacity-50"
+          onInput={(event) => setQuery(event.currentTarget.value)}
+          class="flex-1 bg-transparent text-[14px] text-white placeholder:text-white/30 outline-none"
         />
+
         <Show when={!loading() && (query() || hasActiveFilters())}>
           <span class="text-[12px] font-mono text-white/40 shrink-0">
-            {filteredMessages().length} result{filteredMessages().length !== 1 ? "s" : ""}
+            {results().length} result{results().length !== 1 ? "s" : ""}
           </span>
         </Show>
+
         <button
           type="button"
           class="shrink-0 p-1 text-white/40 hover:text-white transition-colors duration-200 cursor-pointer"
-          onClick={() => setShowFilters((v) => !v)}
+          onClick={() => setShowFilters((value) => !value)}
           aria-label="Toggle filters"
         >
           <Show when={showFilters()} fallback={<ChevronDown size={16} />}>
             <ChevronUp size={16} />
           </Show>
         </button>
+
         <button
           type="button"
           class="shrink-0 p-1 text-white/40 hover:text-white transition-colors duration-200 cursor-pointer"
@@ -252,7 +284,9 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
               <FilterChip
                 active={mediaFilter() === "images"}
                 onClick={() =>
-                  setMediaFilter((v) => (v === "images" ? null : "images"))
+                  setMediaFilter((value) =>
+                    value === "images" ? null : "images",
+                  )
                 }
                 icon={<Image size={12} />}
                 label="images"
@@ -260,7 +294,9 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
               <FilterChip
                 active={mediaFilter() === "videos"}
                 onClick={() =>
-                  setMediaFilter((v) => (v === "videos" ? null : "videos"))
+                  setMediaFilter((value) =>
+                    value === "videos" ? null : "videos",
+                  )
                 }
                 icon={<FileText size={12} />}
                 label="videos"
@@ -268,7 +304,9 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
               <FilterChip
                 active={mediaFilter() === "links"}
                 onClick={() =>
-                  setMediaFilter((v) => (v === "links" ? null : "links"))
+                  setMediaFilter((value) =>
+                    value === "links" ? null : "links",
+                  )
                 }
                 icon={<Link size={12} />}
                 label="links"
@@ -276,14 +314,16 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
               <FilterChip
                 active={mediaFilter() === "files"}
                 onClick={() =>
-                  setMediaFilter((v) => (v === "files" ? null : "files"))
+                  setMediaFilter((value) =>
+                    value === "files" ? null : "files",
+                  )
                 }
                 icon={<FileText size={12} />}
                 label="files"
               />
               <FilterChip
                 active={mentionsOnly()}
-                onClick={() => setMentionsOnly((v) => !v)}
+                onClick={() => setMentionsOnly((value) => !value)}
                 icon={<AtSign size={12} />}
                 label="mentions"
               />
@@ -301,7 +341,7 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
                 <input
                   type="date"
                   value={dateAfter()}
-                  onInput={(e) => setDateAfter(e.currentTarget.value)}
+                  onInput={(event) => setDateAfter(event.currentTarget.value)}
                   class="bg-gray-800 text-[12px] font-mono text-white/60 px-2 py-1 border border-white/10 outline-none focus:border-orange transition-colors duration-200 [color-scheme:dark]"
                   placeholder="after"
                 />
@@ -311,7 +351,7 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
                 <input
                   type="date"
                   value={dateBefore()}
-                  onInput={(e) => setDateBefore(e.currentTarget.value)}
+                  onInput={(event) => setDateBefore(event.currentTarget.value)}
                   class="bg-gray-800 text-[12px] font-mono text-white/60 px-2 py-1 border border-white/10 outline-none focus:border-orange transition-colors duration-200 [color-scheme:dark]"
                   placeholder="before"
                 />
@@ -320,7 +360,7 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
           </div>
 
           {/* clear all */}
-          <Show when={hasActiveFilters()}>
+          <Show when={hasActiveFilters() || query()}>
             <button
               type="button"
               class="self-start text-[11px] font-mono text-orange hover:text-orange-hover transition-colors duration-200 cursor-pointer"
@@ -333,40 +373,56 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
       </Show>
 
       {/* search results */}
-      <Show when={!loading() && (query() || hasActiveFilters())}>
-        <div class="max-h-[320px] overflow-y-auto border-t border-white/5">
+      <Show when={query() || hasActiveFilters()}>
+        <div
+          ref={resultsRef}
+          class="max-h-[320px] overflow-y-auto border-t border-white/5"
+          onScroll={handleResultScroll}
+        >
           <Show
-            when={filteredMessages().length > 0}
+            when={!loading() && results().length > 0}
             fallback={
               <div class="px-4 py-6 text-center text-[13px] text-white/30">
-                no messages found
+                <Show when={loading()} fallback={<>no messages found</>}>
+                  searching messages
+                </Show>
               </div>
             }
           >
-            <For each={filteredMessages()}>
-              {(msg) => (
-                <button
-                  type="button"
-                  class="w-full px-4 py-2 flex items-start gap-3 text-left hover:bg-gray-800 transition-colors duration-200 cursor-pointer group"
-                  onClick={() => handleJump(msg.id)}
-                >
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-baseline gap-2">
-                      <span class="text-[13px] font-medium text-white/80 group-hover:text-white truncate">
-                        {msg.author_name}
-                      </span>
-                      <span class="text-[11px] font-mono text-white/30">
-                        {formatDaySeparator(msg.timestamp)} {formatTime(msg.timestamp)}
-                      </span>
+            <div
+              class="relative"
+              style={{ height: `${Math.max(totalResultHeight(), 1)}px` }}
+            >
+              <For each={visibleResults()}>
+                {(row) => (
+                  <button
+                    type="button"
+                    class="w-full px-4 flex items-start gap-3 text-left hover:bg-gray-800 transition-colors duration-200 cursor-pointer group absolute left-0 right-0"
+                    style={{
+                      top: `${row.index * RESULT_ROW_HEIGHT}px`,
+                      height: `${RESULT_ROW_HEIGHT}px`,
+                    }}
+                    onClick={() => handleJump(row.message)}
+                  >
+                    <div class="flex-1 min-w-0 pt-2">
+                      <div class="flex items-baseline gap-2">
+                        <span class="text-[13px] font-medium text-white/80 group-hover:text-white truncate">
+                          {row.message.from_display_name}
+                        </span>
+                        <span class="text-[11px] font-mono text-white/30">
+                          {formatDaySeparator(row.message.timestamp)}{" "}
+                          {formatTime(row.message.timestamp)}
+                        </span>
+                      </div>
+                      <p
+                        class="text-[13px] text-white/50 truncate mt-0.5"
+                        innerHTML={highlightMatch(row.message.content)}
+                      />
                     </div>
-                    <p
-                      class="text-[13px] text-white/50 truncate mt-0.5"
-                      innerHTML={highlightMatch(msg.content)}
-                    />
-                  </div>
-                </button>
-              )}
-            </For>
+                  </button>
+                )}
+              </For>
+            </div>
           </Show>
         </div>
       </Show>
@@ -374,7 +430,6 @@ const DMSearchPanel: Component<DMSearchPanelProps> = (props) => {
   );
 };
 
-// reusable filter chip
 interface FilterChipProps {
   active: boolean;
   onClick: () => void;
@@ -397,13 +452,12 @@ const FilterChip: Component<FilterChipProps> = (props) => (
   </button>
 );
 
-// utilities
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/\"/g, "&quot;");
 }
 
 function escapeRegex(str: string): string {
