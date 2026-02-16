@@ -48,6 +48,7 @@ import {
   setCategories,
   addCategory,
   categories,
+  channels,
 } from "./stores/channels";
 import {
   addMessage,
@@ -107,6 +108,12 @@ import type {
   DirectMessage,
 } from "./lib/types";
 import { resetSettings } from "./stores/settings";
+import {
+  initNotifications,
+  notifyChannelMessage,
+  notifyDirectMessage,
+  isWindowFocused,
+} from "./lib/notifications";
 
 const App: Component = () => {
   let cleanupResize: (() => void) | undefined;
@@ -276,6 +283,9 @@ const App: Component = () => {
         // settings not found, use defaults
       }
 
+      // initialize notification permission
+      await initNotifications();
+
       // load the peer directory and friends list
       try {
         const peers = await tauri.getKnownPeers();
@@ -322,11 +332,26 @@ const App: Component = () => {
 
   function handleDuskEvent(event: DuskEvent) {
     switch (event.kind) {
-      case "message_received":
-        if (event.payload.channel_id === activeChannelId()) {
-          addMessage(event.payload);
+      case "message_received": {
+        const msg = event.payload;
+        const currentChannelId = activeChannelId();
+        const currentCommunity = activeCommunity();
+
+        // add to store if this is the active channel
+        if (msg.channel_id === currentChannelId) {
+          addMessage(msg);
+        }
+
+        // send notification if window is not focused or this is not the active channel
+        if (!isWindowFocused() || msg.channel_id !== currentChannelId) {
+          const channelList = channels();
+          const channel = channelList.find((c) => c.id === msg.channel_id);
+          const channelName = channel?.name ?? "unknown channel";
+          const communityName = currentCommunity?.name ?? "unknown community";
+          notifyChannelMessage(msg, channelName, communityName);
         }
         break;
+      }
       case "message_deleted":
         removeMessage(event.payload.message_id);
         break;
@@ -385,9 +410,25 @@ const App: Component = () => {
       case "relay_status":
         setRelayConnected(event.payload.connected);
         break;
-      case "dm_received":
-        handleIncomingDM(event.payload);
+      case "dm_received": {
+        const dm = event.payload;
+        handleIncomingDM(dm);
+
+        // send notification if window is not focused or this is not the active dm
+        const currentDMPeer = activeDMPeerId();
+        if (!isWindowFocused() || dm.from_peer !== currentDMPeer) {
+          notifyDirectMessage({
+            id: dm.id,
+            channel_id: "",
+            author_id: dm.from_peer,
+            author_name: dm.from_display_name,
+            content: dm.content,
+            timestamp: dm.timestamp,
+            edited: false,
+          });
+        }
         break;
+      }
       case "dm_typing":
         // only show typing if the sender is the active dm peer
         if (event.payload.peer_id === activeDMPeerId()) {
