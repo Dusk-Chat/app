@@ -32,6 +32,7 @@ pub async fn start_node(app: tauri::AppHandle, state: State<'_, AppState>) -> Re
         state.storage.clone(),
         app,
         state.voice_channels.clone(),
+        state.pending_join_role_guard.clone(),
         custom_relay,
     )
     .await?;

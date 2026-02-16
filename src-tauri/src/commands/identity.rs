@@ -397,6 +397,11 @@ pub async fn reset_identity(state: State<'_, AppState>) -> Result<(), String> {
         engine.clear();
     }
 
+    {
+        let mut guard = state.pending_join_role_guard.lock().await;
+        guard.clear();
+    }
+
     // clear in-memory identity
     *identity = None;
 

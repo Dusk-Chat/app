@@ -177,17 +177,36 @@ pub async fn join_community(
 ) -> Result<CommunityMeta, String> {
     let invite = crate::protocol::community::InviteCode::decode(&invite_code)?;
 
-    let identity = state.identity.lock().await;
-    if identity.is_none() {
-        return Err("no identity loaded".to_string());
-    }
-    drop(identity);
+    let local_peer_id = {
+        let identity = state.identity.lock().await;
+        let id = identity.as_ref().ok_or("no identity loaded")?;
+        id.peer_id.to_string()
+    };
 
     // create a placeholder document that will be backfilled via crdt sync
     // once we connect to existing community members through the relay
     let mut engine = state.crdt_engine.lock().await;
-    if !engine.has_community(&invite.community_id) {
+    let had_existing_doc = engine.has_community(&invite.community_id);
+    if !had_existing_doc {
         engine.create_placeholder_community(&invite.community_id, &invite.community_name, "")?;
+    }
+
+    // joining via invite must never keep elevated local roles from stale local docs
+    if had_existing_doc {
+        if let Ok(members) = engine.get_members(&invite.community_id) {
+            let local_has_elevated_role = members.iter().any(|member| {
+                member.peer_id == local_peer_id
+                    && member
+                        .roles
+                        .iter()
+                        .any(|role| role == "owner" || role == "admin")
+            });
+
+            if local_has_elevated_role {
+                let roles = vec!["member".to_string()];
+                let _ = engine.set_member_role(&invite.community_id, &local_peer_id, &roles);
+            }
+        }
     }
 
     let meta = engine.get_community_meta(&invite.community_id)?;
@@ -198,6 +217,12 @@ pub async fn join_community(
         .get_channels(&invite.community_id)
         .unwrap_or_default();
     drop(engine);
+
+    // mark this community for one-time role hardening on first sync merge
+    {
+        let mut guard = state.pending_join_role_guard.lock().await;
+        guard.insert(invite.community_id.clone());
+    }
 
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
@@ -318,6 +343,10 @@ pub async fn leave_community(
     // remove local cached community state so leave persists across restarts
     let mut engine = state.crdt_engine.lock().await;
     engine.remove_community(&community_id)?;
+    drop(engine);
+
+    let mut guard = state.pending_join_role_guard.lock().await;
+    guard.remove(&community_id);
 
     Ok(())
 }

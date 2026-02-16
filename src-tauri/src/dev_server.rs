@@ -7,7 +7,7 @@
 //
 // NEVER enable this in production builds.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -38,6 +38,7 @@ pub struct DevState {
     pub storage: Arc<DiskStorage>,
     pub node_handle: Arc<Mutex<Option<crate::node::NodeHandle>>>,
     pub voice_channels: Arc<Mutex<HashMap<String, Vec<VoiceParticipant>>>>,
+    pub pending_join_role_guard: Arc<Mutex<HashSet<String>>>,
     pub app_handle: tauri::AppHandle,
 }
 
@@ -466,20 +467,38 @@ async fn join_community(
     let invite = crate::protocol::community::InviteCode::decode(&body.invite_code)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
 
-    let identity = state.identity.lock().await;
-    if identity.is_none() {
-        return Err(ApiError(
-            StatusCode::UNAUTHORIZED,
-            "no identity loaded".into(),
-        ));
-    }
-    drop(identity);
+    let local_peer_id = {
+        let identity = state.identity.lock().await;
+        let id = identity
+            .as_ref()
+            .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "no identity loaded".into()))?;
+        id.peer_id.to_string()
+    };
 
     let mut engine = state.crdt_engine.lock().await;
-    if !engine.has_community(&invite.community_id) {
+    let had_existing_doc = engine.has_community(&invite.community_id);
+    if !had_existing_doc {
         engine
             .create_placeholder_community(&invite.community_id, &invite.community_name, "")
             .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    }
+
+    // joining via invite must never keep elevated local roles from stale local docs
+    if had_existing_doc {
+        if let Ok(members) = engine.get_members(&invite.community_id) {
+            let local_has_elevated_role = members.iter().any(|member| {
+                member.peer_id == local_peer_id
+                    && member
+                        .roles
+                        .iter()
+                        .any(|role| role == "owner" || role == "admin")
+            });
+
+            if local_has_elevated_role {
+                let roles = vec!["member".to_string()];
+                let _ = engine.set_member_role(&invite.community_id, &local_peer_id, &roles);
+            }
+        }
     }
 
     let meta = engine
@@ -491,6 +510,12 @@ async fn join_community(
         .get_channels(&invite.community_id)
         .unwrap_or_default();
     drop(engine);
+
+    // mark this community for one-time role hardening on first sync merge
+    {
+        let mut guard = state.pending_join_role_guard.lock().await;
+        guard.insert(invite.community_id.clone());
+    }
 
     // subscribe and discover via rendezvous
     let node_handle = state.node_handle.lock().await;
@@ -606,6 +631,10 @@ async fn leave_community(
     engine
         .remove_community(&community_id)
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    drop(engine);
+
+    let mut guard = state.pending_join_role_guard.lock().await;
+    guard.remove(&community_id);
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -1052,6 +1081,7 @@ async fn start_node(State(state): State<DevState>) -> ApiResult<serde_json::Valu
         state.storage.clone(),
         state.app_handle.clone(),
         state.voice_channels.clone(),
+        state.pending_join_role_guard.clone(),
         custom_relay,
     )
     .await

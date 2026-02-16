@@ -7,7 +7,7 @@ mod protocol;
 mod storage;
 mod verification;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -24,6 +24,8 @@ pub struct AppState {
     pub node_handle: Arc<Mutex<Option<node::NodeHandle>>>,
     // tracks which peers are in which voice channels, keyed by "community_id:channel_id"
     pub voice_channels: Arc<Mutex<HashMap<String, Vec<VoiceParticipant>>>>,
+    // communities joined via invite that require initial role hardening
+    pub pending_join_role_guard: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -44,6 +46,7 @@ impl AppState {
             storage,
             node_handle: Arc::new(Mutex::new(None)),
             voice_channels: Arc::new(Mutex::new(HashMap::new())),
+            pending_join_role_guard: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }
@@ -89,6 +92,7 @@ pub fn run() {
                     storage: std::sync::Arc::clone(&state.storage),
                     node_handle: std::sync::Arc::clone(&state.node_handle),
                     voice_channels: std::sync::Arc::clone(&state.voice_channels),
+                    pending_join_role_guard: std::sync::Arc::clone(&state.pending_join_role_guard),
                     app_handle: app.handle().clone(),
                 };
                 tauri::async_runtime::spawn(dev_server::start(dev_state));

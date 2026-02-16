@@ -245,6 +245,7 @@ pub async fn start(
     storage: Arc<crate::storage::DiskStorage>,
     app_handle: tauri::AppHandle,
     voice_channels: VoiceChannelMap,
+    pending_join_role_guard: Arc<Mutex<HashSet<String>>>,
     custom_relay_addr: Option<String>,
 ) -> Result<NodeHandle, String> {
     let mut swarm_instance =
@@ -390,10 +391,61 @@ pub async fn start(
                                             } else {
                                                 Vec::new()
                                             };
+                                            let mut corrected_local_role = false;
+                                            let mut corrected_doc_bytes: Option<Vec<u8>> = None;
+                                            if merge_result.is_ok() {
+                                                let should_harden_join_role = {
+                                                    let guard = pending_join_role_guard.lock().await;
+                                                    guard.contains(&community_id)
+                                                };
+
+                                                if should_harden_join_role {
+                                                    let local_peer_id = swarm_instance.local_peer_id().to_string();
+                                                    let local_has_elevated_role = engine
+                                                        .get_members(&community_id)
+                                                        .map(|members| {
+                                                            members.iter().any(|member| {
+                                                                member.peer_id == local_peer_id
+                                                                    && member.roles.iter().any(|role| role == "owner" || role == "admin")
+                                                            })
+                                                        })
+                                                        .unwrap_or(false);
+
+                                                    if local_has_elevated_role {
+                                                        let roles = vec!["member".to_string()];
+                                                        if engine.set_member_role(&community_id, &local_peer_id, &roles).is_ok() {
+                                                            corrected_local_role = true;
+                                                            corrected_doc_bytes = engine.get_doc_bytes(&community_id);
+                                                        }
+                                                    }
+
+                                                    let mut guard = pending_join_role_guard.lock().await;
+                                                    guard.remove(&community_id);
+                                                }
+                                            }
                                             drop(engine);
 
                                             match merge_result {
                                                 Ok(()) => {
+                                                    if let Some(doc_bytes) = corrected_doc_bytes {
+                                                        let corrected_snapshot = crate::crdt::sync::DocumentSnapshot {
+                                                            community_id: community_id.clone(),
+                                                            doc_bytes,
+                                                        };
+                                                        let corrected_offer = crate::crdt::sync::SyncMessage::DocumentOffer(corrected_snapshot);
+                                                        if let Ok(data) = serde_json::to_vec(&corrected_offer) {
+                                                            let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
+                                                            let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                                                        }
+                                                    }
+
+                                                    if corrected_local_role {
+                                                        log::warn!(
+                                                            "downgraded local elevated role to member during invite join sync for {}",
+                                                            community_id
+                                                        );
+                                                    }
+
                                                     // keep topic subscriptions aligned with merged channels
                                                     let presence_topic = libp2p::gossipsub::IdentTopic::new(
                                                         gossip::topic_for_presence(&community_id),
