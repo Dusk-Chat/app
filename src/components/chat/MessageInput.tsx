@@ -71,7 +71,6 @@ const MessageInput: Component<MessageInputProps> = (props) => {
     if (props.mentionPeers) {
       const items: MentionItem[] = [];
       for (const peer of props.mentionPeers) {
-        if (currentUser && peer.id === currentUser.peer_id) continue;
         if (!q || peer.name.toLowerCase().includes(q)) {
           items.push({
             id: peer.id,
@@ -97,7 +96,6 @@ const MessageInput: Component<MessageInputProps> = (props) => {
     }
 
     for (const member of memberList) {
-      if (currentUser && member.peer_id === currentUser.peer_id) continue;
       if (!q || member.display_name.toLowerCase().includes(q)) {
         items.push({
           id: member.peer_id,

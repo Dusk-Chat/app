@@ -1,5 +1,6 @@
 import { members } from "../stores/members";
 import { knownPeers } from "../stores/directory";
+import { identity } from "../stores/identity";
 
 // matches mention tokens in the wire format: <@peer_id> or <@everyone>
 // peer ids are base58-encoded multihash strings (alphanumeric)
@@ -28,12 +29,16 @@ export function isMentioned(content: string, peerId: string): boolean {
   return mentions.includes(peerId) || mentions.includes("everyone");
 }
 
-// resolve a peer id to a display name by checking community members
-// first, then the global peer directory as a fallback
+// resolve a peer id to a display name by checking the current user,
+// community members, then the global peer directory as fallbacks
 export function resolveMentionName(peerId: string): string {
   if (peerId === "everyone") return "everyone";
 
-  // check active community members first
+  // check if this is the current user's own peer id
+  const self = identity();
+  if (self && self.peer_id === peerId) return self.display_name;
+
+  // check active community members
   const memberList = members();
   const member = memberList.find((m) => m.peer_id === peerId);
   if (member) return member.display_name;
@@ -49,6 +54,15 @@ export function resolveMentionName(peerId: string): string {
     return peerId.slice(0, 8) + "...";
   }
   return peerId;
+}
+
+// replace mention tokens in raw content with plain-text @name form
+// used for notification bodies, message previews, and anywhere html isnt needed
+export function resolveMentionsPlainText(content: string): string {
+  return content.replace(
+    new RegExp(MENTION_REGEX.source, "g"),
+    (_match, id: string) => `@${resolveMentionName(id)}`,
+  );
 }
 
 // replace mention tokens in html-escaped content with rendered spans

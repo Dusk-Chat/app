@@ -1,17 +1,21 @@
 import type { Component } from "solid-js";
-import { Show, createMemo } from "solid-js";
-import { AtSign } from "lucide-solid";
+import { Show, createMemo, createSignal } from "solid-js";
+import { Phone, Pin, Search } from "lucide-solid";
 import {
   activeDMConversation,
   dmMessages,
   dmTypingPeers,
+  setDMMessages,
 } from "../../stores/dms";
 import { onlinePeerIds } from "../../stores/members";
+import { identity } from "../../stores/identity";
 import MessageList from "../chat/MessageList";
 import MessageInput from "../chat/MessageInput";
 import TypingIndicator from "../chat/TypingIndicator";
+import DMSearchPanel from "../chat/DMSearchPanel";
 import Avatar from "../common/Avatar";
-import type { ChatMessage } from "../../lib/types";
+import IconButton from "../common/IconButton";
+import type { ChatMessage, DirectMessage } from "../../lib/types";
 
 interface DMChatAreaProps {
   onSendDM: (content: string) => void;
@@ -19,6 +23,7 @@ interface DMChatAreaProps {
 }
 
 const DMChatArea: Component<DMChatAreaProps> = (props) => {
+  const [searchOpen, setSearchOpen] = createSignal(false);
   const dm = () => activeDMConversation();
 
   // adapt DirectMessage[] to ChatMessage[] so the existing MessageList works
@@ -42,6 +47,31 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
     return "offline";
   });
 
+  // scroll to a message by id, loading full history into the store if needed
+  function handleJumpToMessage(
+    messageId: string,
+    allMessages: DirectMessage[],
+  ) {
+    const alreadyLoaded = dmMessages().some((m) => m.id === messageId);
+
+    if (!alreadyLoaded) {
+      // replace the store with the full history so the target is in the dom
+      setDMMessages(allMessages);
+    }
+
+    // wait for the dom to update then scroll and highlight
+    requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-message-id="${messageId}"]`,
+      ) as HTMLElement | null;
+      if (!el) return;
+
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("dusk-msg-search-highlight");
+      setTimeout(() => el.classList.remove("dusk-msg-search-highlight"), 2000);
+    });
+  }
+
   // typing indicator names
   const typingNames = createMemo(() => {
     const typing = dmTypingPeers();
@@ -57,23 +87,48 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
       {/* dm header */}
       <div class="h-15 shrink-0 border-b border-white/10 flex flex-col justify-end">
         <div class="h-12 flex items-center justify-between px-4">
-          <div class="flex items-center gap-2 min-w-0">
+          <div class="flex items-center gap-3 min-w-0">
             <Show when={dm()}>
-              <AtSign size={20} class="shrink-0 text-white/40" />
+              <Avatar
+                name={dm()!.display_name}
+                size="sm"
+                status={peerStatus() === "online" ? "Online" : "Offline"}
+                showStatus
+              />
               <span class="text-[16px] font-bold text-white truncate">
                 {dm()!.display_name}
               </span>
-              <span
-                class={`text-[12px] font-mono ml-1 ${
-                  peerStatus() === "online" ? "text-success" : "text-white/30"
-                }`}
-              >
-                {peerStatus()}
-              </span>
             </Show>
+          </div>
+
+          <div class="flex items-center gap-1 shrink-0">
+            <IconButton
+              label="Search messages"
+              active={searchOpen()}
+              onClick={() => setSearchOpen((v) => !v)}
+            >
+              <Search size={18} />
+            </IconButton>
+            <IconButton label="Start call">
+              <Phone size={18} />
+            </IconButton>
+            <IconButton label="Pinned messages">
+              <Pin size={18} />
+            </IconButton>
           </div>
         </div>
       </div>
+
+      {/* search panel */}
+      <Show when={searchOpen() && dm()}>
+        <DMSearchPanel
+          peerId={dm()!.peer_id}
+          myPeerId={identity()?.peer_id ?? ""}
+          peerName={dm()!.display_name}
+          onClose={() => setSearchOpen(false)}
+          onJumpToMessage={handleJumpToMessage}
+        />
+      </Show>
 
       {/* conversation history */}
       <Show
@@ -113,6 +168,15 @@ const DMChatArea: Component<DMChatAreaProps> = (props) => {
               name: dm()!.display_name,
               status: onlinePeerIds().has(dm()!.peer_id) ? "Online" : "Offline",
             },
+            ...(identity()
+              ? [
+                  {
+                    id: identity()!.peer_id,
+                    name: identity()!.display_name,
+                    status: "Online" as const,
+                  },
+                ]
+              : []),
           ]}
         />
       </Show>

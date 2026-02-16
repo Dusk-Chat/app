@@ -7,6 +7,7 @@ import type { MediaKind } from "../../lib/markdown";
 import { removeMessage } from "../../stores/messages";
 import { activeCommunityId } from "../../stores/communities";
 import { identity } from "../../stores/identity";
+import { isMentioned } from "../../lib/mentions";
 import Avatar from "../common/Avatar";
 import Lightbox from "../common/Lightbox";
 import { openProfileCard } from "../../stores/ui";
@@ -35,6 +36,13 @@ const Message: Component<MessageProps> = (props) => {
   const mediaKind = createMemo<MediaKind>(() =>
     getStandaloneMediaKind(props.message.content),
   );
+
+  // check if the current user is mentioned in this message
+  const mentionsMe = createMemo(() => {
+    const user = currentUser();
+    if (!user) return false;
+    return isMentioned(props.message.content, user.peer_id);
+  });
 
   const [lightboxOpen, setLightboxOpen] = createSignal(false);
 
@@ -106,9 +114,10 @@ const Message: Component<MessageProps> = (props) => {
 
   return (
     <div
-      class={`flex items-start gap-4 hover:bg-gray-900 transition-colors duration-200 px-4 ${
-        props.isFirstInGroup ? "pt-2" : "pt-0.5"
-      } ${props.isLastInGroup ? "pb-2" : "pb-0.5"}`}
+      data-message-id={props.message.id}
+      class={`flex items-start gap-4 transition-colors duration-200 px-4 ${
+        mentionsMe() ? "dusk-msg-mentioned" : "hover:bg-gray-900"
+      } ${props.isFirstInGroup ? "pt-2" : "pt-0.5"} ${props.isLastInGroup ? "pb-2" : "pb-0.5"}`}
       onContextMenu={handleContextMenu}
     >
       <Show

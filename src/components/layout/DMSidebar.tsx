@@ -1,6 +1,7 @@
 import type { Component } from "solid-js";
 import { For, Show, createSignal } from "solid-js";
 import { MessageCircle, Search, X, Plus, Group, Users } from "lucide-solid";
+import { resolveMentionsPlainText } from "../../lib/mentions";
 import {
   dmConversations,
   activeDMPeerId,
@@ -170,7 +171,7 @@ const DMSidebar: Component = () => {
                 </div>
                 <Show when={dm.last_message}>
                   <p class="text-[12px] text-white/40 truncate mt-0.5">
-                    {dm.last_message}
+                    {resolveMentionsPlainText(dm.last_message!)}
                   </p>
                 </Show>
               </div>

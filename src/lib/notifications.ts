@@ -13,6 +13,7 @@ import { setActiveDM } from "../stores/dms";
 import { generateAvatarSvg, avatarCacheKey } from "./avatar-svg";
 import { cacheAvatarIcon } from "./tauri";
 import type { ChatMessage } from "./types";
+import { resolveMentionsPlainText } from "./mentions";
 
 // track if we have notification permission
 let permissionGranted = false;
@@ -181,7 +182,7 @@ export async function notifyChannelMessage(
 
   await sendNotification(
     `${message.author_name} in ${communityName} > ${channelName}`,
-    message.content,
+    resolveMentionsPlainText(message.content),
     message.author_name,
     extra,
   );
@@ -213,7 +214,7 @@ export async function notifyMention(
 
   await sendNotification(
     `${message.author_name} mentioned you in ${communityName} > ${channelName}`,
-    message.content,
+    resolveMentionsPlainText(message.content),
     message.author_name,
     extra,
   );
@@ -242,7 +243,7 @@ export async function notifyDirectMessage(
 
   await sendNotification(
     `${message.author_name}`,
-    message.content,
+    resolveMentionsPlainText(message.content),
     message.author_name,
     extra,
   );

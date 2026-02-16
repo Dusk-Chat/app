@@ -598,6 +598,33 @@ body {
   background: rgba(255, 255, 255, 0.15);
 }
 
+/* highlight messages that mention the current user */
+.dusk-msg-mentioned {
+  background: rgba(255, 79, 0, 0.08);
+  border-left: 2px solid var(--color-accent);
+}
+
+.dusk-msg-mentioned:hover {
+  background: rgba(255, 79, 0, 0.12);
+}
+
+/* flash highlight when jumping to a message from search */
+.dusk-msg-search-highlight {
+  animation: search-highlight-flash 2s ease-out forwards;
+}
+
+@keyframes search-highlight-flash {
+  0% {
+    background: rgba(255, 79, 0, 0.2);
+  }
+  70% {
+    background: rgba(255, 79, 0, 0.1);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
 .dusk-msg-image-wrapper {
   white-space: normal;
 }
