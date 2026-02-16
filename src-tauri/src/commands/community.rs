@@ -272,6 +272,10 @@ pub async fn join_community(
                 .await;
         }
 
+        // drop the node_handle lock before calling request_sync to avoid deadlock
+        // request_sync tries to acquire its own node_handle lock
+        drop(node_handle);
+
         // request a snapshot now so joins work even when peers were already connected
         request_sync(&state).await;
 
