@@ -337,10 +337,14 @@ pub async fn set_relay_address(
     state: State<'_, AppState>,
     relay_addr: String,
 ) -> Result<(), String> {
-    // validate the relay address format
-    let _ = relay_addr
-        .parse::<libp2p::Multiaddr>()
-        .map_err(|_| "invalid relay address format")?;
+    // validate relay format and require /p2p/<peer-id> component
+    let (validated_multiaddr, validated_peer_id) =
+        crate::node::validate_relay_multiaddr(&relay_addr)?;
+    log::info!(
+        "updating relay address to {} (peer {})",
+        validated_multiaddr,
+        validated_peer_id
+    );
 
     // stop the current node if running
     {
@@ -356,7 +360,7 @@ pub async fn set_relay_address(
 
     // update settings with the new relay address
     let mut settings = state.storage.load_settings().unwrap_or_default();
-    settings.custom_relay_addr = Some(relay_addr);
+    settings.custom_relay_addr = Some(validated_multiaddr.to_string());
     state
         .storage
         .save_settings(&settings)
