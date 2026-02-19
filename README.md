@@ -295,19 +295,35 @@ common artifact types by platform:
 cross-platform packaging is automated in:
 
 ```text
-app/.github/workflows/desktop-packaging.yml
+app/.gitea/workflows/desktop-packaging.yml
 ```
 
 workflow behavior:
 
-- runs a matrix build on `ubuntu-22.04`, `macos-latest`, and `windows-latest`
+- runs a matrix build on **self-hosted gitea runners** for linux, macos, and windows
+- uses runner label sets:
+  - linux: `self-hosted`, `linux`, `x64`
+  - macos: `self-hosted`, `macos`
+  - windows: `self-hosted`, `windows`, `x64`
 - installs bun + rust, then runs platform-specific packaging scripts from `app/package.json`
-- uploads generated bundles from `app/src-tauri/target/release/bundle/**` as artifacts:
-  - `dusk-linux-bundles`
-  - `dusk-macos-bundles`
-  - `dusk-windows-bundles`
+- archives bundles from `app/src-tauri/target/release/bundle/` into:
+  - `ci-artifacts/dusk-linux-bundles.tar.gz`
+  - `ci-artifacts/dusk-macos-bundles.tar.gz`
+  - `ci-artifacts/dusk-windows-bundles.zip`
+- attempts artifact upload with `actions/upload-artifact` (best effort)
+- always keeps a fallback copy in runner workspace at `ci-artifacts/` (printed in logs), so artifacts can still be collected when artifact-service compatibility differs across gitea setups
 
-the workflow triggers on manual dispatch, version tags (`v*`), and pull requests that touch the app or packaging workflow.
+workflow triggers:
+
+- manual dispatch (`workflow_dispatch`)
+- version tag pushes matching `v*`
+- pull requests touching `app/**` (including packaging files)
+
+runner assumptions:
+
+- runners are provisioned and registered in gitea with the labels listed above
+- linux runners either provide tauri system deps already, or support `apt-get` installation during the workflow
+- macos/windows signing and notarization are not configured in this workflow; output installers are unsigned unless runner-side signing is added
 
 ## contributing
 

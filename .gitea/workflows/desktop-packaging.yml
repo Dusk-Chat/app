@@ -6,27 +6,36 @@ on:
     tags:
       - "v*"
   pull_request:
+    paths:
+      - "app/**"
+      - "app/.gitea/workflows/**"
 
 jobs:
   bundle:
     name: Bundle (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner_labels }}
+    defaults:
+      run:
+        working-directory: app
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux
-            os: ubuntu-22.04
+            runner_labels: [self-hosted, linux, x64]
             package_script: package:linux
             artifact_name: dusk-linux-bundles
+            artifact_file: dusk-linux-bundles.tar.gz
           - name: macOS
-            os: macos-latest
+            runner_labels: [self-hosted, macos]
             package_script: package:macos
             artifact_name: dusk-macos-bundles
+            artifact_file: dusk-macos-bundles.tar.gz
           - name: Windows
-            os: windows-latest
+            runner_labels: [self-hosted, windows, x64]
             package_script: package:windows
             artifact_name: dusk-windows-bundles
+            artifact_file: dusk-windows-bundles.zip
 
     steps:
       - name: Checkout
@@ -43,17 +52,36 @@ jobs:
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
+          set -euo pipefail
+          if command -v apt-get >/dev/null 2>&1; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y \
+                libwebkit2gtk-4.1-dev \
+                build-essential \
+                curl \
+                wget \
+                file \
+                libxdo-dev \
+                libssl-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev
+            else
+              apt-get update
+              apt-get install -y \
+                libwebkit2gtk-4.1-dev \
+                build-essential \
+                curl \
+                wget \
+                file \
+                libxdo-dev \
+                libssl-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev
+            fi
+          else
+            echo "apt-get not available; assuming Linux runner dependencies are preinstalled"
+          fi
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -61,9 +89,35 @@ jobs:
       - name: Build Tauri bundles
         run: bun run ${{ matrix.package_script }}
 
-      - name: Upload bundle artifacts
+      - name: Prepare artifact directory
+        run: mkdir -p ../ci-artifacts
+
+      - name: Create artifact archive (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          test -d src-tauri/target/release/bundle
+          tar -C src-tauri/target/release -czf ../ci-artifacts/${{ matrix.artifact_file }} bundle
+
+      - name: Create artifact archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path "src-tauri/target/release/bundle")) {
+            throw "Bundle output directory not found: src-tauri/target/release/bundle"
+          }
+          Compress-Archive -Path "src-tauri/target/release/bundle/*" -DestinationPath "../ci-artifacts/${{ matrix.artifact_file }}" -Force
+
+      - name: Upload bundle artifact (Gitea-compatible, best effort)
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           if-no-files-found: error
-          path: src-tauri/target/release/bundle/**
+          path: ci-artifacts/${{ matrix.artifact_file }}
+
+      - name: Print fallback artifact location on runner
+        if: always()
+        run: |
+          echo "fallback artifacts directory on runner: ${GITHUB_WORKSPACE}/ci-artifacts"
+          ls -lah ../ci-artifacts
