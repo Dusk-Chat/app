@@ -27,7 +27,11 @@ pub struct UserSettings {
     pub font_size: String,
     #[serde(default)]
     pub custom_relay_addr: Option<String>,
+    #[serde(default = "default_true")]
+    pub relay_discoverable: bool,
 }
+
+fn default_true() -> bool { true }
 
 impl Default for UserSettings {
     fn default() -> Self {
@@ -43,6 +47,7 @@ impl Default for UserSettings {
             message_display: "cozy".to_string(),
             custom_relay_addr: None,
             font_size: "default".to_string(),
+            relay_discoverable: true,
         }
     }
 }

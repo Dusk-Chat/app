@@ -9,6 +9,7 @@ use libp2p::{
 };
 
 use super::behaviour::DuskBehaviour;
+use crate::protocol::directory::{DirectoryRequest, DirectoryResponse, DIRECTORY_PROTOCOL};
 use crate::protocol::gif::{GifRequest, GifResponse, GIF_PROTOCOL};
 
 pub fn build_swarm(
@@ -82,6 +83,12 @@ pub fn build_swarm(
                 // gif search via request-response to the relay (outbound only)
                 gif_service: cbor::Behaviour::<GifRequest, GifResponse>::new(
                     [(GIF_PROTOCOL, ProtocolSupport::Outbound)],
+                    request_response::Config::default()
+                        .with_request_timeout(Duration::from_secs(15)),
+                ),
+                // directory search via request-response to the relay (outbound only)
+                directory_service: cbor::Behaviour::<DirectoryRequest, DirectoryResponse>::new(
+                    [(DIRECTORY_PROTOCOL, ProtocolSupport::Outbound)],
                     request_response::Config::default()
                         .with_request_timeout(Duration::from_secs(15)),
                 ),

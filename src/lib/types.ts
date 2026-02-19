@@ -68,6 +68,9 @@ export interface UserSettings {
 
   // network
   custom_relay_addr?: string;
+
+  // discovery
+  relay_discoverable: boolean;
 }
 
 export interface CommunityMeta {
