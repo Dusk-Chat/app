@@ -11,6 +11,7 @@ const defaultSettings: UserSettings = {
   enable_message_preview: true,
   show_online_status: true,
   allow_dms_from_anyone: true,
+  relay_discoverable: true,
   message_display: "cozy",
   font_size: "default",
 };
@@ -83,6 +84,13 @@ export function toggleAllowDMsFromAnyone() {
   setSettings((prev) => ({
     ...prev,
     allow_dms_from_anyone: !prev.allow_dms_from_anyone,
+  }));
+}
+
+export function toggleRelayDiscoverable() {
+  setSettings((prev) => ({
+    ...prev,
+    relay_discoverable: !prev.relay_discoverable,
   }));
 }
 

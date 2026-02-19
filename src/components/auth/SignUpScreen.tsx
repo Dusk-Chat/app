@@ -167,6 +167,11 @@ const SignUpScreen: Component<SignUpScreenProps> = (props) => {
               an ed25519 keypair will be generated and stored locally on your
               device
             </p>
+            <p class="text-[11px] font-mono text-white/30 text-center mt-2 leading-relaxed">
+              your username will be stored on the relay server so others can
+              find you even when you're offline.{" "}
+              <span class="text-white/40">you can turn this off in settings.</span>
+            </p>
           </div>
         </Match>
       </Switch>

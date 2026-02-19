@@ -16,6 +16,7 @@ import {
   Users,
   Copy,
   Check,
+  WifiOff,
 } from "lucide-solid";
 import Avatar from "../common/Avatar";
 import Button from "../common/Button";
@@ -263,7 +264,9 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
                     <p class="text-[14px] text-white/20">
                       {activeTab() === "friends"
                         ? "add friends from the all peers tab"
-                        : "peers will appear as you join communities"}
+                        : searchQuery().trim().length > 0
+                          ? "try searching by peer id or check your relay connection"
+                          : "peers will appear as you join communities or search by name"}
                     </p>
                   </div>
                 }
@@ -281,6 +284,12 @@ const UserDirectoryModal: Component<UserDirectoryModalProps> = (props) => {
                             <Show when={peer.is_friend}>
                               <span class="text-[10px] font-mono uppercase tracking-[0.05em] text-orange px-1.5 py-0.5 border border-orange/30 shrink-0">
                                 friend
+                              </span>
+                            </Show>
+                            <Show when={!peer.public_key}>
+                              <span class="flex items-center gap-1 text-[10px] font-mono uppercase tracking-[0.05em] text-white/30 px-1.5 py-0.5 border border-white/10 shrink-0">
+                                <WifiOff size={8} />
+                                offline
                               </span>
                             </Show>
                           </div>

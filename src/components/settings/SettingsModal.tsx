@@ -21,11 +21,12 @@ import {
   toggleMessagePreview,
   toggleShowOnlineStatus,
   toggleAllowDMsFromAnyone,
+  toggleRelayDiscoverable,
   setMessageDisplay,
   setFontSize,
 } from "../../stores/settings";
 import { identity, updateIdentity } from "../../stores/identity";
-import { updateProfile } from "../../lib/tauri";
+import { updateProfile, setRelayDiscoverable } from "../../lib/tauri";
 import type { UserStatus } from "../../lib/types";
 import Avatar from "../common/Avatar";
 import Button from "../common/Button";
@@ -377,6 +378,19 @@ const PrivacySection: Component<{
         description="receive direct messages from people not in your communities"
         checked={current().allow_dms_from_anyone}
         onChange={toggleAllowDMsFromAnyone}
+      />
+      <ToggleRow
+        label="discoverable on relay"
+        description="lets others find you by username even when you're offline. turning this off removes your profile from the relay index."
+        checked={current().relay_discoverable ?? true}
+        onChange={async () => {
+          toggleRelayDiscoverable();
+          try {
+            await setRelayDiscoverable(!current().relay_discoverable);
+          } catch (e) {
+            console.error("failed to set relay discoverable:", e);
+          }
+        }}
       />
 
       {/* danger zone */}
