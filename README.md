@@ -260,6 +260,55 @@ cd relay-server && cargo run
 DUSK_RELAY_PORT=4002 cargo run
 ```
 
+## desktop packaging (windows / macos / linux)
+
+run packaging commands from the `app/` directory.
+
+```bash
+# all bundles supported by your current OS
+bun run package
+
+# linux bundles
+bun run package:linux
+
+# macOS bundles
+bun run package:macos
+
+# windows bundles
+bun run package:windows
+```
+
+expected bundle outputs are written to:
+
+```text
+app/src-tauri/target/release/bundle/
+```
+
+common artifact types by platform:
+
+- linux: `appimage`, `deb`, `rpm`
+- macos: `.app`, `.dmg`
+- windows: `nsis` installer, `msi`
+
+### ci packaging workflow
+
+cross-platform packaging is automated in:
+
+```text
+app/.github/workflows/desktop-packaging.yml
+```
+
+workflow behavior:
+
+- runs a matrix build on `ubuntu-22.04`, `macos-latest`, and `windows-latest`
+- installs bun + rust, then runs platform-specific packaging scripts from `app/package.json`
+- uploads generated bundles from `app/src-tauri/target/release/bundle/**` as artifacts:
+  - `dusk-linux-bundles`
+  - `dusk-macos-bundles`
+  - `dusk-windows-bundles`
+
+the workflow triggers on manual dispatch, version tags (`v*`), and pull requests that touch the app or packaging workflow.
+
 ## contributing
 
 1. fork the repository and install dependencies as described above

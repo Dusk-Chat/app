@@ -7,8 +7,16 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 tauri",
-    "tauri:dev-server": "WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 tauri dev --features dev-server"
+    "tauri": "tauri",
+    "tauri:linux": "WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:dev:linux": "WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 tauri dev",
+    "tauri:dev-server": "tauri dev --features dev-server",
+    "tauri:dev-server:linux": "WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=x11 tauri dev --features dev-server",
+    "package": "tauri build",
+    "package:linux": "tauri build --bundles appimage,deb,rpm",
+    "package:macos": "tauri build --bundles app,dmg",
+    "package:windows": "tauri build --bundles nsis,msi"
   },
   "license": "MIT",
   "dependencies": {
