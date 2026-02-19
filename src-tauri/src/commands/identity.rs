@@ -254,12 +254,15 @@ pub async fn search_directory(
     query: String,
 ) -> Result<Vec<DirectoryEntry>, String> {
     ipc_log!("search_directory", {
+        let query_trimmed = query.trim().to_string();
+
+        // local search first
         let entries = state
             .storage
             .load_directory()
             .map_err(|e| format!("failed to load directory: {}", e))?;
 
-        let query_lower = query.to_lowercase();
+        let query_lower = query_trimmed.to_lowercase();
         let mut results: Vec<DirectoryEntry> = entries
             .into_values()
             .filter(|entry| {
@@ -267,8 +270,63 @@ pub async fn search_directory(
                     || entry.peer_id.to_lowercase().contains(&query_lower)
             })
             .collect();
-
         results.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+
+        // relay fallback when local results are sparse
+        if results.len() < 5 && !query_trimmed.is_empty() {
+            let node_handle = state.node_handle.lock().await;
+            if let Some(ref handle) = *node_handle {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let _ = handle
+                    .command_tx
+                    .send(crate::node::NodeCommand::DirectorySearch {
+                        query: query_trimmed.clone(),
+                        reply: tx,
+                    })
+                    .await;
+                drop(node_handle);
+
+                // wait up to 5 seconds for relay response
+                if let Ok(Ok(Ok(relay_entries))) =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), rx).await
+                {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+
+                    for entry in relay_entries {
+                        // upsert as stub — empty bio/public_key means never directly connected
+                        let stub = DirectoryEntry {
+                            peer_id: entry.peer_id.clone(),
+                            display_name: entry.display_name,
+                            bio: String::new(),
+                            public_key: String::new(),
+                            last_seen: entry.last_seen.saturating_mul(1000).max(now - 86_400_000),
+                            is_friend: false,
+                        };
+                        // preserve existing local data if we already know this peer
+                        let _ = state.storage.save_directory_entry_if_new(&stub);
+                    }
+
+                    // re-run local search to get merged results
+                    let entries2 = state
+                        .storage
+                        .load_directory()
+                        .unwrap_or_default();
+                    let mut results2: Vec<DirectoryEntry> = entries2
+                        .into_values()
+                        .filter(|entry| {
+                            entry.display_name.to_lowercase().contains(&query_lower)
+                                || entry.peer_id.to_lowercase().contains(&query_lower)
+                        })
+                        .collect();
+                    results2.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+                    return Ok(results2);
+                }
+            }
+        }
+
         Ok(results)
     })
 }
@@ -327,6 +385,33 @@ pub async fn discover_global_peers(state: State<'_, AppState>) -> Result<(), Str
             .await;
     }
     Ok(())
+}
+
+// toggle relay discoverability at runtime and sync the setting to disk
+#[tauri::command]
+pub async fn set_relay_discoverable(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    ipc_log!("set_relay_discoverable", {
+        // persist setting
+        let mut settings = state.storage.load_settings().unwrap_or_default();
+        settings.relay_discoverable = enabled;
+        state
+            .storage
+            .save_settings(&settings)
+            .map_err(|e| format!("failed to save settings: {}", e))?;
+
+        // notify running node
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            let _ = handle
+                .command_tx
+                .send(crate::node::NodeCommand::SetRelayDiscoverable { enabled })
+                .await;
+        }
+        Ok(())
+    })
 }
 
 // change relay address and restart the node

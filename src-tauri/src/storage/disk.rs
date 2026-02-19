@@ -744,6 +744,27 @@ impl DiskStorage {
         Ok(())
     }
 
+    // save a directory entry only if the peer is not already known
+    // preserves existing data (bio, public_key) when upserting relay stubs
+    pub fn save_directory_entry_if_new(&self, entry: &DirectoryEntry) -> Result<(), io::Error> {
+        let conn = self.open_conn()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO directory_entries (
+                peer_id, display_name, bio, public_key, last_seen, is_friend
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                entry.peer_id,
+                entry.display_name,
+                entry.bio,
+                entry.public_key,
+                entry.last_seen as i64,
+                if entry.is_friend { 1_i64 } else { 0_i64 }
+            ],
+        )
+        .map_err(sqlite_to_io_error)?;
+        Ok(())
+    }
+
     // load the entire peer directory
     pub fn load_directory(&self) -> Result<HashMap<String, DirectoryEntry>, io::Error> {
         let conn = self.open_conn()?;
