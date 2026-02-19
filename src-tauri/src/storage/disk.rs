@@ -744,14 +744,16 @@ impl DiskStorage {
         Ok(())
     }
 
-    // save a directory entry only if the peer is not already known
-    // preserves existing data (bio, public_key) when upserting relay stubs
+    // upsert a directory entry from the relay — updates display_name and last_seen but preserves bio, public_key, and is_friend
     pub fn save_directory_entry_if_new(&self, entry: &DirectoryEntry) -> Result<(), io::Error> {
         let conn = self.open_conn()?;
         conn.execute(
-            "INSERT OR IGNORE INTO directory_entries (
+            "INSERT INTO directory_entries (
                 peer_id, display_name, bio, public_key, last_seen, is_friend
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(peer_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                last_seen    = CASE WHEN excluded.last_seen > last_seen THEN excluded.last_seen ELSE last_seen END",
             params![
                 entry.peer_id,
                 entry.display_name,

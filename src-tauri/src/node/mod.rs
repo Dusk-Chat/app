@@ -1408,10 +1408,10 @@ pub async fn start(
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::DirectoryService(
                             libp2p::request_response::Event::OutboundFailure { request_id, error, .. }
                         )) => {
+                            log::warn!("directory: outbound failure: {:?}", error);
                             if let Some(reply) = pending_directory_replies.remove(&request_id) {
                                 let _ = reply.send(Err(format!("directory request failed: {:?}", error)));
                             }
-                            log::warn!("directory: outbound failure: {:?}", error);
                         }
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::DirectoryService(_)) => {}
 
@@ -1714,24 +1714,28 @@ pub async fn start(
                             }
                         }
                         Some(NodeCommand::DirectoryRegister) => {
-                            if let Some(rp) = relay_peer {
-                                let profile = storage.load_profile().unwrap_or_default();
-                                swarm_instance.behaviour_mut().directory_service.send_request(
-                                    &rp,
-                                    crate::protocol::directory::DirectoryRequest::Register {
-                                        display_name: profile.display_name,
-                                    },
-                                );
-                                log::info!("directory: sent Register (command)");
+                            if relay_reservation_active {
+                                if let Some(rp) = relay_peer {
+                                    let profile = storage.load_profile().unwrap_or_default();
+                                    swarm_instance.behaviour_mut().directory_service.send_request(
+                                        &rp,
+                                        crate::protocol::directory::DirectoryRequest::Register {
+                                            display_name: profile.display_name,
+                                        },
+                                    );
+                                    log::info!("directory: sent Register (command)");
+                                }
                             }
                         }
                         Some(NodeCommand::DirectoryRemove) => {
-                            if let Some(rp) = relay_peer {
-                                swarm_instance.behaviour_mut().directory_service.send_request(
-                                    &rp,
-                                    crate::protocol::directory::DirectoryRequest::Remove,
-                                );
-                                log::info!("directory: sent Remove (command)");
+                            if relay_reservation_active {
+                                if let Some(rp) = relay_peer {
+                                    swarm_instance.behaviour_mut().directory_service.send_request(
+                                        &rp,
+                                        crate::protocol::directory::DirectoryRequest::Remove,
+                                    );
+                                    log::info!("directory: sent Remove (command)");
+                                }
                             }
                         }
                         Some(NodeCommand::DirectorySearch { query, reply }) => {
@@ -1750,24 +1754,26 @@ pub async fn start(
                         }
                         Some(NodeCommand::SetRelayDiscoverable { enabled }) => {
                             relay_discoverable = enabled;
-                            if enabled {
-                                if let Some(rp) = relay_peer {
-                                    let profile = storage.load_profile().unwrap_or_default();
-                                    swarm_instance.behaviour_mut().directory_service.send_request(
-                                        &rp,
-                                        crate::protocol::directory::DirectoryRequest::Register {
-                                            display_name: profile.display_name,
-                                        },
-                                    );
-                                    log::info!("directory: registered after opt-in");
-                                }
-                            } else {
-                                if let Some(rp) = relay_peer {
-                                    swarm_instance.behaviour_mut().directory_service.send_request(
-                                        &rp,
-                                        crate::protocol::directory::DirectoryRequest::Remove,
-                                    );
-                                    log::info!("directory: removed after opt-out");
+                            if relay_reservation_active {
+                                if enabled {
+                                    if let Some(rp) = relay_peer {
+                                        let profile = storage.load_profile().unwrap_or_default();
+                                        swarm_instance.behaviour_mut().directory_service.send_request(
+                                            &rp,
+                                            crate::protocol::directory::DirectoryRequest::Register {
+                                                display_name: profile.display_name,
+                                            },
+                                        );
+                                        log::info!("directory: registered after opt-in");
+                                    }
+                                } else {
+                                    if let Some(rp) = relay_peer {
+                                        swarm_instance.behaviour_mut().directory_service.send_request(
+                                            &rp,
+                                            crate::protocol::directory::DirectoryRequest::Remove,
+                                        );
+                                        log::info!("directory: removed after opt-out");
+                                    }
                                 }
                             }
                         }
