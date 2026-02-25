@@ -8,7 +8,6 @@ import { Extension } from "@tiptap/core";
 import Mention from "@tiptap/extension-mention";
 import { tiptapToMarkdown } from "../../lib/markdown";
 import { members } from "../../stores/members";
-import { identity } from "../../stores/identity";
 import EmojiPicker from "./EmojiPicker";
 import GifPicker from "./GifPicker";
 import MentionList from "./MentionList";
@@ -65,7 +64,6 @@ const MessageInput: Component<MessageInputProps> = (props) => {
   // build the mention items list from community members or dm peers
   function getMentionItems(query: string): MentionItem[] {
     const q = query.toLowerCase();
-    const currentUser = identity();
 
     // dm context uses the explicit peer list passed via props
     if (props.mentionPeers) {

@@ -223,6 +223,10 @@ pub enum NodeCommand {
     SetRelayDiscoverable {
         enabled: bool,
     },
+    // request time-limited TURN server credentials from the relay
+    GetTurnCredentials {
+        reply: tokio::sync::oneshot::Sender<Result<crate::protocol::turn::TurnCredentialResponse, String>>,
+    },
 }
 
 // events emitted from the node to the tauri frontend
@@ -485,6 +489,14 @@ pub async fn start(
             libp2p::request_response::OutboundRequestId,
             tokio::sync::oneshot::Sender<
                 Result<Vec<crate::protocol::directory::DirectoryProfileEntry>, String>,
+            >,
+        > = HashMap::new();
+
+        // pending turn credential replies keyed by request_response request id
+        let mut pending_turn_credential_replies: HashMap<
+            libp2p::request_response::OutboundRequestId,
+            tokio::sync::oneshot::Sender<
+                Result<crate::protocol::turn::TurnCredentialResponse, String>,
             >,
         > = HashMap::new();
 
@@ -1401,6 +1413,10 @@ pub async fn start(
                                     crate::protocol::directory::DirectoryResponse::Ok => {
                                         let _ = reply.send(Ok(vec![]));
                                     }
+                                    crate::protocol::directory::DirectoryResponse::Error(msg) => {
+                                        log::warn!("directory service error from relay: {}", msg);
+                                        let _ = reply.send(Ok(vec![]));
+                                    }
                                 }
                             }
                         }
@@ -1414,6 +1430,29 @@ pub async fn start(
                             }
                         }
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::DirectoryService(_)) => {}
+
+                        // turn credentials response from relay
+                        libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::TurnCredentials(
+                            libp2p::request_response::Event::Message {
+                                message: libp2p::request_response::Message::Response { request_id, response },
+                                ..
+                            }
+                        )) => {
+                            if let Some(reply) = pending_turn_credential_replies.remove(&request_id) {
+                                let _ = reply.send(Ok(response));
+                            }
+                        }
+                        // turn credentials outbound failure
+                        libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::TurnCredentials(
+                            libp2p::request_response::Event::OutboundFailure { request_id, error, .. }
+                        )) => {
+                            log::warn!("turn credentials: outbound failure: {:?}", error);
+                            if let Some(reply) = pending_turn_credential_replies.remove(&request_id) {
+                                let _ = reply.send(Err(format!("turn credentials request failed: {:?}", error)));
+                            }
+                        }
+                        // ignore inbound requests and other events for turn credentials
+                        libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::TurnCredentials(_)) => {}
 
                         _ => {}
                     }
@@ -1775,6 +1814,23 @@ pub async fn start(
                                         log::info!("directory: removed after opt-out");
                                     }
                                 }
+                            }
+                        }
+                        Some(NodeCommand::GetTurnCredentials { reply }) => {
+                            if let Some(rp) = relay_peer {
+                                let local_peer_id = swarm_instance.local_peer_id().to_string();
+                                let request_id = swarm_instance
+                                    .behaviour_mut()
+                                    .turn_credentials
+                                    .send_request(
+                                        &rp,
+                                        crate::protocol::turn::TurnCredentialRequest {
+                                            peer_id: local_peer_id,
+                                        },
+                                    );
+                                pending_turn_credential_replies.insert(request_id, reply);
+                            } else {
+                                let _ = reply.send(Err("not connected to relay".to_string()));
                             }
                         }
                     }

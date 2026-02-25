@@ -9,7 +9,6 @@ import {
 import { knownPeers, friends } from "../../stores/directory";
 import { onlinePeerIds } from "../../stores/members";
 import { identity } from "../../stores/identity";
-import { peerCount, nodeStatus } from "../../stores/connection";
 import { openModal } from "../../stores/ui";
 import * as tauri from "../../lib/tauri";
 import Avatar from "../common/Avatar";

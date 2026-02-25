@@ -398,6 +398,19 @@ export async function getVoiceParticipants(
   return invoke("get_voice_participants", { communityId, channelId });
 }
 
+// -- turn credentials --
+
+export interface TurnCredentials {
+  username: string;
+  password: string;
+  ttl: number;
+  uris: string[];
+}
+
+export async function getTurnCredentials(): Promise<TurnCredentials> {
+  return invoke("get_turn_credentials");
+}
+
 // -- direct messages --
 
 export async function sendDM(

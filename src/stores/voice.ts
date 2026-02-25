@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createSignal, createMemo } from "solid-js";
 import type { VoiceMediaState, VoiceParticipant } from "../lib/types";
 import { PeerConnectionManager } from "../lib/webrtc";
 import {
@@ -7,6 +7,7 @@ import {
   updateVoiceMediaState,
   sendVoiceSdp,
   sendVoiceIceCandidate,
+  getTurnCredentials,
 } from "../lib/tauri";
 import { identity } from "./identity";
 
@@ -30,15 +31,34 @@ const [remoteStreams, setRemoteStreams] = createSignal<
 >(new Map());
 const [screenStream, setScreenStream] = createSignal<MediaStream | null>(null);
 
+// per-peer WebRTC connection state tracking
+const [peerConnectionStates, setPeerConnectionStates] = createSignal<
+  Record<string, RTCPeerConnectionState>
+>({});
+
 // tracks the voice connection lifecycle so the ui can show proper feedback
 export type VoiceConnectionState =
   | "idle"
   | "connecting"
   | "connected"
+  | "degraded"
   | "error";
 const [voiceConnectionState, setVoiceConnectionState] =
   createSignal<VoiceConnectionState>("idle");
 const [voiceError, setVoiceError] = createSignal<string | null>(null);
+
+// overall voice connection quality summary derived from per-peer states
+const voiceQuality = createMemo(() => {
+  const states = peerConnectionStates();
+  const entries = Object.entries(states);
+  if (entries.length === 0) return "good";
+  const connected = entries.filter(([, s]) => s === "connected").length;
+  const failed = entries.filter(([, s]) => s === "failed").length;
+  if (failed === entries.length) return "failed";
+  if (failed > 0) return "degraded";
+  if (connected === entries.length) return "good";
+  return "connecting";
+});
 
 // derived signal for convenience
 export function isInVoice(): boolean {
@@ -48,71 +68,109 @@ export function isInVoice(): boolean {
 // single peer connection manager instance for the lifetime of a voice session
 let peerManager: PeerConnectionManager | null = null;
 
+// evaluate overall voice connection state from per-peer states
+function evaluateOverallVoiceState(): void {
+  const states = peerConnectionStates();
+  const entries = Object.entries(states);
+
+  // if no peers, we're the only participant — stay connected
+  if (entries.length === 0) {
+    // only update if we're currently in a voice channel (not leaving)
+    if (voiceChannelId() !== null && voiceConnectionState() !== "idle") {
+      setVoiceConnectionState("connected");
+    }
+    return;
+  }
+
+  const connected = entries.filter(([, s]) => s === "connected").length;
+  const failed = entries.filter(([, s]) => s === "failed").length;
+
+  if (connected > 0 && failed > 0) {
+    setVoiceConnectionState("degraded");
+  } else if (connected > 0) {
+    setVoiceConnectionState("connected");
+  } else if (failed === entries.length) {
+    setVoiceConnectionState("error");
+  }
+  // otherwise remain in "connecting" state (peers still negotiating)
+}
+
 // initialize the peer manager with callbacks wired to our handlers
-function initPeerManager(): PeerConnectionManager {
-  const manager = new PeerConnectionManager();
+function initPeerManager(iceServers?: RTCIceServer[]): PeerConnectionManager {
+  const manager = new PeerConnectionManager({
+    iceServers,
+    onRemoteStream: (peerId: string, stream: MediaStream) => {
+      console.log(`[Voice] Remote stream received from ${peerId}`);
+      setRemoteStreams((prev) => {
+        const next = new Map(prev);
+        next.set(peerId, stream);
+        return next;
+      });
+    },
 
-  manager.onRemoteStream = (peerId: string, stream: MediaStream) => {
-    setRemoteStreams((prev) => {
-      const next = new Map(prev);
-      next.set(peerId, stream);
-      return next;
-    });
-  };
+    onRemoteStreamRemoved: (peerId: string) => {
+      console.log(`[Voice] Remote stream removed for ${peerId}`);
+      setRemoteStreams((prev) => {
+        const next = new Map(prev);
+        next.delete(peerId);
+        return next;
+      });
+    },
 
-  manager.onRemoteStreamRemoved = (peerId: string) => {
-    setRemoteStreams((prev) => {
-      const next = new Map(prev);
-      next.delete(peerId);
-      return next;
-    });
-  };
+    onIceCandidate: async (peerId: string, candidate: RTCIceCandidate) => {
+      const communityId = voiceCommunityId();
+      const channelId = voiceChannelId();
+      if (!communityId || !channelId) return;
 
-  manager.onIceCandidate = async (
-    peerId: string,
-    candidate: RTCIceCandidate,
-  ) => {
-    const communityId = voiceCommunityId();
-    const channelId = voiceChannelId();
-    if (!communityId || !channelId) return;
+      try {
+        await sendVoiceIceCandidate(
+          communityId,
+          channelId,
+          peerId,
+          candidate.candidate,
+          candidate.sdpMid,
+          candidate.sdpMLineIndex,
+        );
+      } catch (err) {
+        console.error("[Voice] Failed to send ICE candidate:", err);
+      }
+    },
 
-    try {
-      await sendVoiceIceCandidate(
-        communityId,
-        channelId,
-        peerId,
-        candidate.candidate,
-        candidate.sdpMid,
-        candidate.sdpMLineIndex,
-      );
-    } catch (err) {
-      console.error("failed to send ice candidate:", err);
-    }
-  };
+    onNegotiationNeeded: async (
+      peerId: string,
+      sdp: RTCSessionDescriptionInit,
+    ) => {
+      const communityId = voiceCommunityId();
+      const channelId = voiceChannelId();
+      if (!communityId || !channelId) return;
 
-  manager.onNegotiationNeeded = async (peerId: string) => {
-    const communityId = voiceCommunityId();
-    const channelId = voiceChannelId();
-    if (!communityId || !channelId) return;
+      // the webrtc module handles glare resolution and creates the offer/restart SDP
+      // we just need to send it via the signaling channel
+      try {
+        console.log(
+          `[Voice] Sending ${sdp.type} SDP to ${peerId} (negotiation/restart)`,
+        );
+        await sendVoiceSdp(
+          communityId,
+          channelId,
+          peerId,
+          sdp.type || "offer",
+          sdp.sdp || "",
+        );
+      } catch (err) {
+        console.error("[Voice] Failed to send SDP during negotiation:", err);
+      }
+    },
 
-    // only the peer with the lexicographically smaller id initiates the offer
-    if (!manager.shouldOffer(peerId)) {
-      return;
-    }
-
-    try {
-      const offer = await manager.createOffer(peerId);
-      await sendVoiceSdp(
-        communityId,
-        channelId,
-        peerId,
-        offer.type || "offer",
-        offer.sdp || "",
-      );
-    } catch (err) {
-      console.error("failed to send offer during renegotiation:", err);
-    }
-  };
+    onPeerConnectionStateChanged: (
+      peerId: string,
+      state: RTCPeerConnectionState,
+    ) => {
+      console.log(`[Voice] Peer ${peerId} connection state: ${state}`);
+      setPeerConnectionStates((prev) => ({ ...prev, [peerId]: state }));
+      evaluateOverallVoiceState();
+    },
+  });
 
   return manager;
 }
@@ -177,8 +235,29 @@ export async function joinVoice(
     const stream = await acquireLocalMedia(false);
     setLocalStream(stream);
 
+    // fetch TURN credentials from our relay server
+    let turnServers: RTCIceServer[] = [];
+    try {
+      const creds = await getTurnCredentials();
+      turnServers = [{
+        urls: creds.uris,
+        username: creds.username,
+        credential: creds.password,
+      }];
+      console.log(`[Voice] Fetched TURN credentials (ttl=${creds.ttl}s, uris=${creds.uris.length})`);
+    } catch (e) {
+      console.warn('[Voice] Failed to fetch TURN credentials, proceeding without TURN:', e);
+    }
+
+    // combine public STUN servers with dynamic TURN servers
+    const iceServers: RTCIceServer[] = [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      ...turnServers,
+    ];
+
     // initialize peer manager and set our local peer id for glare resolution
-    peerManager = initPeerManager();
+    peerManager = initPeerManager(iceServers);
     const localPeerId = identity()?.peer_id;
     if (localPeerId) {
       peerManager.setLocalPeerId(localPeerId);
@@ -191,13 +270,22 @@ export async function joinVoice(
     setVoiceChannelId(channelId);
     setVoiceCommunityId(communityId);
     setVoiceParticipants(participants);
-    setVoiceConnectionState("connected");
+
+    // determine how many remote peers we need to connect to
+    const remotePeers = participants.filter(
+      (p) => p.peer_id !== localPeerId,
+    );
+
+    if (remotePeers.length === 0) {
+      // we're the only participant — no peers to connect to, so we're connected
+      console.log("[Voice] No remote peers, marking as connected");
+      setVoiceConnectionState("connected");
+    }
+    // otherwise stay in "connecting" until onPeerConnectionStateChanged fires
 
     // create peer connections for all existing participants
     // we only initiate offers if our peer id is lexicographically smaller
-    for (const participant of participants) {
-      if (participant.peer_id === localPeerId) continue;
-
+    for (const participant of remotePeers) {
       peerManager.createConnection(participant.peer_id);
 
       if (peerManager.shouldOffer(participant.peer_id)) {
@@ -212,14 +300,14 @@ export async function joinVoice(
           );
         } catch (err) {
           console.error(
-            `failed to create offer for ${participant.peer_id}:`,
+            `[Voice] Failed to create offer for ${participant.peer_id}:`,
             err,
           );
         }
       }
     }
   } catch (err) {
-    console.error("failed to join voice channel:", err);
+    console.error("[Voice] Failed to join voice channel:", err);
     // surface a readable error message to the ui
     const message = err instanceof Error ? err.message : String(err);
     setVoiceError(message);
@@ -248,8 +336,9 @@ export async function leaveVoice(): Promise<void> {
   releaseLocalMedia();
   releaseScreenShare();
 
-  // clear remote streams
+  // clear remote streams and peer connection states
   setRemoteStreams(new Map());
+  setPeerConnectionStates({});
 
   // tell the backend to leave
   if (communityId && channelId) {
@@ -381,6 +470,10 @@ export async function toggleVideo(): Promise<void> {
       if (videoTrack && localStream()) {
         // add video track to existing stream
         localStream()!.addTrack(videoTrack);
+        // stop the unused audio tracks from the new stream to prevent resource leak
+        for (const audioTrack of videoStream.getAudioTracks()) {
+          audioTrack.stop();
+        }
       } else if (videoTrack) {
         setLocalStream(videoStream);
       }
@@ -601,12 +694,20 @@ export function handleVoiceParticipantLeft(payload: {
     peerManager.closeConnection(payload.peer_id);
   }
 
-  // remove remote stream
+  // remove remote stream and peer connection state
   setRemoteStreams((prev) => {
     const next = new Map(prev);
     next.delete(payload.peer_id);
     return next;
   });
+  setPeerConnectionStates((prev) => {
+    const next = { ...prev };
+    delete next[payload.peer_id];
+    return next;
+  });
+
+  // re-evaluate overall voice state after peer removal
+  evaluateOverallVoiceState();
 }
 
 export function handleVoiceMediaStateChanged(payload: {
@@ -708,4 +809,6 @@ export {
   screenStream,
   voiceConnectionState,
   voiceError,
+  peerConnectionStates,
+  voiceQuality,
 };

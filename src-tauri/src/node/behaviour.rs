@@ -1,5 +1,6 @@
 use crate::protocol::directory::{DirectoryRequest, DirectoryResponse};
 use crate::protocol::gif::{GifRequest, GifResponse};
+use crate::protocol::turn::{TurnCredentialRequest, TurnCredentialResponse};
 use libp2p::{
     gossipsub, identify, kad, mdns, ping, relay, rendezvous, request_response::cbor,
     swarm::NetworkBehaviour,
@@ -18,4 +19,6 @@ pub struct DuskBehaviour {
     pub gif_service: cbor::Behaviour<GifRequest, GifResponse>,
     // directory search: register/search/remove profiles on the relay
     pub directory_service: cbor::Behaviour<DirectoryRequest, DirectoryResponse>,
+    // turn credentials: request time-limited TURN server credentials from the relay
+    pub turn_credentials: cbor::Behaviour<TurnCredentialRequest, TurnCredentialResponse>,
 }

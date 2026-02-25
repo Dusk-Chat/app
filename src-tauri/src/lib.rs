@@ -63,18 +63,26 @@ pub fn run() {
         .setup(|app| {
             // grant microphone/camera permissions on linux webkitgtk
             // without this, getUserMedia is denied by default
+            // only allow UserMediaPermissionRequest (mic/camera), deny everything else
             #[cfg(target_os = "linux")]
             {
                 use tauri::Manager;
                 if let Some(window) = app.get_webview_window("main") {
                     window
                         .with_webview(|webview| {
+                            use webkit2gtk::glib::prelude::ObjectExt;
                             use webkit2gtk::PermissionRequestExt;
                             use webkit2gtk::WebViewExt;
                             let wv = webview.inner();
                             wv.connect_permission_request(|_webview, request| {
-                                request.allow();
-                                true
+                                if request.is::<webkit2gtk::UserMediaPermissionRequest>() {
+                                    request.allow();
+                                    true
+                                } else {
+                                    // deny all other permission types (geolocation, etc.)
+                                    request.deny();
+                                    true
+                                }
                             });
                         })
                         .ok();
@@ -150,6 +158,7 @@ pub fn run() {
             commands::voice::send_voice_sdp,
             commands::voice::send_voice_ice_candidate,
             commands::voice::get_voice_participants,
+            commands::voice::get_turn_credentials,
             commands::dm::send_dm,
             commands::dm::get_dm_messages,
             commands::dm::search_dm_messages,

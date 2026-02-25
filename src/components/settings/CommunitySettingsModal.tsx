@@ -42,7 +42,7 @@ import { clearMessages } from "../../stores/messages";
 import * as tauri from "../../lib/tauri";
 import Avatar from "../common/Avatar";
 import Button from "../common/Button";
-import type { ChannelMeta, CategoryMeta, Member } from "../../lib/types";
+import type { ChannelMeta, Member } from "../../lib/types";
 
 type CommunitySettingsSection =
   | "overview"
@@ -86,8 +86,6 @@ const CommunitySettingsModal: Component<CommunitySettingsModalProps> = (
       setActiveSection(props.initialSection ?? "overview");
     }
   });
-
-  const community = () => activeCommunity();
 
   const sections: {
     id: CommunitySettingsSection;

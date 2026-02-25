@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { For, Show, createSignal } from "solid-js";
-import { MessageCircle, Search, X, Plus, Group, Users } from "lucide-solid";
+import { Search, X, Plus, Users } from "lucide-solid";
 import { resolveMentionsPlainText } from "../../lib/mentions";
 import {
   dmConversations,

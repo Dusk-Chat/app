@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { Show, createEffect, onCleanup } from "solid-js";
-import { MicOff, VolumeX } from "lucide-solid";
+import { MicOff, VolumeX, AlertTriangle } from "lucide-solid";
 import Avatar from "../common/Avatar";
 import { openProfileCard } from "../../stores/ui";
 import type { VoiceMediaState } from "../../lib/types";
@@ -11,6 +11,7 @@ interface VoiceParticipantTileProps {
   media_state: VoiceMediaState;
   stream?: MediaStream | null;
   is_local?: boolean;
+  connectionState?: RTCPeerConnectionState;
 }
 
 const VoiceParticipantTile: Component<VoiceParticipantTileProps> = (props) => {
@@ -38,9 +39,28 @@ const VoiceParticipantTile: Component<VoiceParticipantTileProps> = (props) => {
     );
   };
 
+  // per-peer connection state ring styling
+  const connectionRingClass = () => {
+    const state = props.connectionState;
+    switch (state) {
+      case "connected":
+        return "ring-2 ring-green-500/70";
+      case "connecting":
+      case "new":
+        return "ring-2 ring-amber-400/70 animate-pulse";
+      case "failed":
+        return "ring-2 ring-red-500/80";
+      case "disconnected":
+        return "ring-2 ring-white/30";
+      case "closed":
+      default:
+        return "";
+    }
+  };
+
   return (
     <div
-      class="relative bg-black border border-white/10 aspect-video flex items-center justify-center overflow-hidden cursor-pointer"
+      class={`relative bg-black border border-white/10 aspect-video flex items-center justify-center overflow-hidden cursor-pointer ${connectionRingClass()}`}
       onClick={(e) => {
         openProfileCard({
           peerId: props.peer_id,
@@ -75,15 +95,25 @@ const VoiceParticipantTile: Component<VoiceParticipantTileProps> = (props) => {
         </div>
       </Show>
 
-      <Show when={props.media_state.muted}>
-        <div class="absolute top-2 right-2 bg-black/80 p-1">
-          <MicOff size={16} class="text-[#FF4F00]" />
-        </div>
-      </Show>
+      {/* media state indicators — stacked vertically to avoid overlap */}
+      <div class="absolute top-2 right-2 flex flex-col gap-1">
+        <Show when={props.media_state.muted}>
+          <div class="bg-black/80 p-1">
+            <MicOff size={16} class="text-[#FF4F00]" />
+          </div>
+        </Show>
 
-      <Show when={props.media_state.deafened}>
-        <div class="absolute top-2 right-2 bg-black/80 p-1">
-          <VolumeX size={16} class="text-[#FF4F00]" />
+        <Show when={props.media_state.deafened}>
+          <div class="bg-black/80 p-1">
+            <VolumeX size={16} class="text-[#FF4F00]" />
+          </div>
+        </Show>
+      </div>
+
+      {/* connection failed warning */}
+      <Show when={props.connectionState === "failed"}>
+        <div class="absolute bottom-2 right-2 bg-red-900/80 p-1 rounded">
+          <AlertTriangle size={14} class="text-red-400" />
         </div>
       </Show>
 

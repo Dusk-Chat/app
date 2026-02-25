@@ -17,6 +17,7 @@ pub enum DirectoryRequest {
 pub enum DirectoryResponse {
     Ok,
     Results(Vec<DirectoryProfileEntry>),
+    Error(String),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

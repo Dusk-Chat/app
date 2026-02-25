@@ -7,6 +7,8 @@ import {
   remoteStreams,
   voiceConnectionState,
   voiceError,
+  voiceQuality,
+  peerConnectionStates,
   joinVoice,
 } from "../../stores/voice";
 import { identity } from "../../stores/identity";
@@ -61,11 +63,51 @@ const VoiceChannel: Component<VoiceChannelProps> = (props) => {
     return allParticipants().length;
   };
 
+  // voice quality indicator config
+  const qualityConfig = () => {
+    const q = voiceQuality();
+    switch (q) {
+      case "good":
+        return { color: "bg-green-500", text: "Connected" };
+      case "connecting":
+        return { color: "bg-amber-400 animate-pulse", text: "Connecting..." };
+      case "degraded":
+        return { color: "bg-orange-500", text: "Degraded" };
+      case "failed":
+        return { color: "bg-red-500", text: "Connection Failed" };
+      default:
+        return { color: "bg-white/40", text: "" };
+    }
+  };
+
+  // look up per-peer connection state for a participant
+  const getPeerState = (peerId: string, isLocal: boolean) => {
+    if (isLocal) return "connected" as RTCPeerConnectionState;
+    return peerConnectionStates()[peerId];
+  };
+
   return (
     <div class="flex flex-col h-full bg-black">
       <div class="flex-1 overflow-auto p-4">
         <div class="mb-4">
-          <h2 class="text-white text-lg font-semibold">Voice Channel</h2>
+          <div class="flex items-center gap-2">
+            <h2 class="text-white text-lg font-semibold">Voice Channel</h2>
+            <Show
+              when={
+                voiceConnectionState() === "connected" ||
+                voiceConnectionState() === "degraded"
+              }
+            >
+              <div class="flex items-center gap-1.5 ml-2">
+                <span
+                  class={`inline-block w-2 h-2 rounded-full ${qualityConfig().color}`}
+                />
+                <span class="text-white/50 text-xs">
+                  {qualityConfig().text}
+                </span>
+              </div>
+            </Show>
+          </div>
           <p class="text-white/60 text-sm">
             {participantCount()} participant
             {participantCount() !== 1 ? "s" : ""}
@@ -100,8 +142,13 @@ const VoiceChannel: Component<VoiceChannelProps> = (props) => {
           </div>
         </Show>
 
-        {/* connected state with participants grid */}
-        <Show when={voiceConnectionState() === "connected"}>
+        {/* connected / degraded state with participants grid */}
+        <Show
+          when={
+            voiceConnectionState() === "connected" ||
+            voiceConnectionState() === "degraded"
+          }
+        >
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <For each={allParticipants()}>
               {(participant) => (
@@ -111,6 +158,10 @@ const VoiceChannel: Component<VoiceChannelProps> = (props) => {
                   media_state={participant.media_state}
                   stream={participant.stream}
                   is_local={participant.is_local}
+                  connectionState={getPeerState(
+                    participant.peer_id,
+                    participant.is_local,
+                  )}
                 />
               )}
             </For>
@@ -118,7 +169,12 @@ const VoiceChannel: Component<VoiceChannelProps> = (props) => {
         </Show>
       </div>
 
-      <Show when={voiceConnectionState() === "connected"}>
+      <Show
+        when={
+          voiceConnectionState() === "connected" ||
+          voiceConnectionState() === "degraded"
+        }
+      >
         <VoiceControls />
       </Show>
     </div>

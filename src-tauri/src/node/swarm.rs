@@ -11,6 +11,9 @@ use libp2p::{
 use super::behaviour::DuskBehaviour;
 use crate::protocol::directory::{DirectoryRequest, DirectoryResponse, DIRECTORY_PROTOCOL};
 use crate::protocol::gif::{GifRequest, GifResponse, GIF_PROTOCOL};
+use crate::protocol::turn::{
+    TurnCredentialRequest, TurnCredentialResponse, TURN_CREDENTIALS_PROTOCOL,
+};
 
 pub fn build_swarm(
     keypair: &identity::Keypair,
@@ -92,6 +95,13 @@ pub fn build_swarm(
                     request_response::Config::default()
                         .with_request_timeout(Duration::from_secs(15)),
                 ),
+                // turn credentials via request-response to the relay (outbound only)
+                turn_credentials:
+                    cbor::Behaviour::<TurnCredentialRequest, TurnCredentialResponse>::new(
+                        [(TURN_CREDENTIALS_PROTOCOL, ProtocolSupport::Outbound)],
+                        request_response::Config::default()
+                            .with_request_timeout(Duration::from_secs(10)),
+                    ),
             }
         })?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(300)))
