@@ -67,7 +67,7 @@ const DMSidebar: Component = () => {
           <Show when={searchQuery()}>
             <button
               type="button"
-              class="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors cursor-pointer"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-gray-800 focus-visible:text-white"
               onClick={() => setSearchQuery("")}
             >
               <X size={12} />
@@ -83,7 +83,7 @@ const DMSidebar: Component = () => {
       {/* friends button at top, like discord */}
       <button
         type="button"
-        class={`flex items-center gap-3 w-full h-11 px-3 text-[16px] transition-all duration-200 cursor-pointer ${
+        class={`flex items-center gap-3 w-full h-11 px-3 text-[16px] transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:bg-gray-800 focus-visible:text-white ${
           activeDMPeerId() === null
             ? "bg-gray-800 text-white"
             : "text-white/60 hover:bg-gray-800 hover:text-white"
@@ -105,7 +105,7 @@ const DMSidebar: Component = () => {
         </span>
         <button
           type="button"
-          class="text-white/40 hover:text-white transition-colors duration-200 cursor-pointer"
+          class="text-white/40 hover:text-white transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:bg-gray-800 focus-visible:text-white"
           title="new dm"
           onClick={() => openModal("directory")}
         >
@@ -131,7 +131,7 @@ const DMSidebar: Component = () => {
             <div
               role="button"
               tabIndex={0}
-              class={`flex items-center gap-3 w-full px-3 py-2 transition-all duration-200 cursor-pointer group ${
+              class={`flex items-center gap-3 w-full px-3 py-2 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:bg-gray-800 focus-visible:text-white group ${
                 activeDMPeerId() === dm.peer_id
                   ? "bg-gray-800 text-white"
                   : "text-white/60 hover:bg-gray-800/60 hover:text-white"
@@ -161,7 +161,7 @@ const DMSidebar: Component = () => {
                     </Show>
                     <button
                       type="button"
-                      class="w-5 h-5 flex items-center justify-center text-white/0 group-hover:text-white/30 hover:!text-red-400 transition-colors duration-200 cursor-pointer"
+                      class="w-5 h-5 flex items-center justify-center text-white/0 group-hover:text-white/30 hover:!text-red-400 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:bg-gray-800 focus-visible:text-white"
                       title="close conversation"
                       onClick={(e) => handleDeleteConversation(e, dm.peer_id)}
                     >

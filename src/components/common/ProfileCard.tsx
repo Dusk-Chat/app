@@ -4,6 +4,7 @@ import { Portal } from "solid-js/web";
 import { UserPlus, UserMinus, Copy, Check } from "lucide-solid";
 import { createSignal } from "solid-js";
 import Avatar from "./Avatar";
+import ProfileEffectRenderer from "./ProfileEffectRenderer";
 import {
   profileCardTarget,
   closeProfileCard,
@@ -13,6 +14,7 @@ import { members, isPeerOnline } from "../../stores/members";
 import { knownPeers } from "../../stores/directory";
 import { identity } from "../../stores/identity";
 import { settings } from "../../stores/settings";
+import { getUserEffect, getPeerEffects } from "../../stores/effects";
 import { markAsFriend, unmarkAsFriend } from "../../stores/directory";
 import * as tauri from "../../lib/tauri";
 import { formatTime } from "../../lib/utils";
@@ -69,13 +71,41 @@ const ProfileCard: Component = () => {
   const roles = () => memberInfo()?.roles ?? [];
   const joinedAt = () => memberInfo()?.joined_at ?? 0;
 
+  // resolve profile effects for the viewed peer
+  const clickEffect = createMemo(() => {
+    const t = target();
+    if (!t) return undefined;
+    if (t.peerId === identity()?.peer_id) {
+      return getUserEffect("click");
+    }
+    return getPeerEffects(t.peerId)?.click;
+  });
+
+  const hoverEffect = createMemo(() => {
+    const t = target();
+    if (!t) return undefined;
+    if (t.peerId === identity()?.peer_id) {
+      return getUserEffect("hover");
+    }
+    return getPeerEffects(t.peerId)?.hover;
+  });
+
+  const entranceEffect = createMemo(() => {
+    const t = target();
+    if (!t) return undefined;
+    if (t.peerId === identity()?.peer_id) {
+      return getUserEffect("entrance");
+    }
+    return getPeerEffects(t.peerId)?.entrance;
+  });
+
   // close on escape or click outside
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") closeProfileCard();
   }
 
   function handleClickOutside(e: MouseEvent) {
-    if (cardRef && !cardRef.contains(e.target as Node)) {
+    if (cardRef && !e.composedPath().includes(cardRef)) {
       closeProfileCard();
     }
   }
@@ -159,7 +189,11 @@ const ProfileCard: Component = () => {
     }
   }
 
-  function handleOpenFullProfile() {
+  function handleOpenFullProfile(e?: Event) {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     const t = target();
     if (t) openProfileModal(t.peerId);
   }
@@ -189,6 +223,48 @@ const ProfileCard: Component = () => {
             left: `${cardPosition().left}px`,
           }}
         >
+          {/* entrance effect overlay */}
+          <Show when={entranceEffect()}>
+            <div class="absolute inset-0 z-10 pointer-events-none">
+              <ProfileEffectRenderer
+                effect={entranceEffect()}
+                trigger="entrance"
+                size={320}
+                scope="card"
+              >
+                <div />
+              </ProfileEffectRenderer>
+            </div>
+          </Show>
+
+          {/* hover effect overlay */}
+          <Show when={hoverEffect()}>
+            <div class="absolute inset-0 z-10 pointer-events-none">
+              <ProfileEffectRenderer
+                effect={hoverEffect()}
+                trigger="entrance"
+                size={320}
+                scope="card"
+              >
+                <div />
+              </ProfileEffectRenderer>
+            </div>
+          </Show>
+
+          {/* click effect overlay */}
+          <Show when={clickEffect()}>
+            <div class="absolute inset-0 z-10 pointer-events-none">
+              <ProfileEffectRenderer
+                effect={clickEffect()}
+                trigger="entrance"
+                size={320}
+                scope="card"
+              >
+                <div />
+              </ProfileEffectRenderer>
+            </div>
+          </Show>
+
           {/* header banner */}
           <div class="h-16 bg-linear-to-r from-orange/30 to-orange/10" />
 
@@ -199,12 +275,30 @@ const ProfileCard: Component = () => {
               class="cursor-pointer"
               onClick={handleOpenFullProfile}
             >
-              <Avatar
-                name={displayName()}
-                size="xl"
-                status={status()}
-                showStatus
-              />
+              <ProfileEffectRenderer
+                effect={entranceEffect()}
+                trigger="entrance"
+                size={64}
+              >
+                <ProfileEffectRenderer
+                  effect={hoverEffect()}
+                  trigger="entrance"
+                  size={64}
+                >
+                  <ProfileEffectRenderer
+                    effect={clickEffect()}
+                    trigger="entrance"
+                    size={64}
+                  >
+                    <Avatar
+                      name={displayName()}
+                      size="xl"
+                      status={status()}
+                      showStatus
+                    />
+                  </ProfileEffectRenderer>
+                </ProfileEffectRenderer>
+              </ProfileEffectRenderer>
             </button>
           </div>
 

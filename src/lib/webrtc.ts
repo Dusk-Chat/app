@@ -4,8 +4,8 @@
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   // Public STUN servers (free, no auth needed)
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  { urls: "stun:stun.cloudflare.com:3478" },
   // TURN servers are added dynamically via getTurnCredentials()
 ];
 
@@ -20,7 +20,10 @@ export interface PeerConnectionManagerConfig {
   onIceCandidate: (peerId: string, candidate: RTCIceCandidate) => void;
   onRemoteStream: (peerId: string, stream: MediaStream) => void;
   onRemoteStreamRemoved: (peerId: string) => void;
-  onPeerConnectionStateChanged?: (peerId: string, state: RTCPeerConnectionState) => void;
+  onPeerConnectionStateChanged?: (
+    peerId: string,
+    state: RTCPeerConnectionState,
+  ) => void;
   iceServers?: RTCIceServer[];
 }
 
@@ -37,6 +40,7 @@ interface PeerState {
 
 export class PeerConnectionManager {
   private peers: Map<string, PeerState> = new Map();
+  private unknownPeerCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
   private localStream: MediaStream | null = null;
   private screenStream: MediaStream | null = null;
   private rtcConfig: RTCConfiguration;
@@ -48,9 +52,15 @@ export class PeerConnectionManager {
   // these are used when the class is constructed without a config object
   onRemoteStream: ((peerId: string, stream: MediaStream) => void) | null = null;
   onRemoteStreamRemoved: ((peerId: string) => void) | null = null;
-  onIceCandidate: ((peerId: string, candidate: RTCIceCandidate) => void) | null = null;
-  onNegotiationNeeded: ((peerId: string, sdp?: RTCSessionDescriptionInit) => void) | null = null;
-  onPeerConnectionStateChanged: ((peerId: string, state: RTCPeerConnectionState) => void) | null = null;
+  onIceCandidate:
+    | ((peerId: string, candidate: RTCIceCandidate) => void)
+    | null = null;
+  onNegotiationNeeded:
+    | ((peerId: string, sdp?: RTCSessionDescriptionInit) => void)
+    | null = null;
+  onPeerConnectionStateChanged:
+    | ((peerId: string, state: RTCPeerConnectionState) => void)
+    | null = null;
 
   private config: PeerConnectionManagerConfig | null = null;
 
@@ -58,7 +68,7 @@ export class PeerConnectionManager {
     const iceServers = config?.iceServers ?? DEFAULT_ICE_SERVERS;
     this.rtcConfig = {
       iceServers,
-      iceTransportPolicy: 'all',
+      iceTransportPolicy: "all",
     };
 
     if (config) {
@@ -67,10 +77,14 @@ export class PeerConnectionManager {
       this.onRemoteStream = config.onRemoteStream;
       this.onRemoteStreamRemoved = config.onRemoteStreamRemoved;
       this.onIceCandidate = config.onIceCandidate;
-      this.onNegotiationNeeded = (peerId: string, sdp?: RTCSessionDescriptionInit) => {
+      this.onNegotiationNeeded = (
+        peerId: string,
+        sdp?: RTCSessionDescriptionInit,
+      ) => {
         if (sdp) config.onNegotiationNeeded(peerId, sdp);
       };
-      this.onPeerConnectionStateChanged = config.onPeerConnectionStateChanged ?? null;
+      this.onPeerConnectionStateChanged =
+        config.onPeerConnectionStateChanged ?? null;
     }
   }
 
@@ -94,18 +108,27 @@ export class PeerConnectionManager {
 
   // create a new peer connection for a remote peer
   // accepts an optional localStream parameter (for new API), falls back to this.localStream
-  createConnection(peerId: string, localStream?: MediaStream | null): RTCPeerConnection {
+  createConnection(
+    peerId: string,
+    localStream?: MediaStream | null,
+  ): RTCPeerConnection {
     // close any existing connection to this peer before creating a new one
     this.removeConnection(peerId);
 
     const pc = new RTCPeerConnection(this.rtcConfig);
     const peerState: PeerState = {
       pc,
-      candidateBuffer: [],
+      candidateBuffer: this.unknownPeerCandidates.get(peerId) || [],
       restartAttempts: 0,
       disconnectTimer: null,
     };
     this.peers.set(peerId, peerState);
+    if (this.unknownPeerCandidates.has(peerId)) {
+      console.log(
+        `[WebRTC] Recovered ${this.unknownPeerCandidates.get(peerId)?.length} early candidates for ${peerId}`,
+      );
+      this.unknownPeerCandidates.delete(peerId);
+    }
 
     // add all local tracks to the new connection
     const stream = localStream ?? this.localStream;
@@ -132,7 +155,9 @@ export class PeerConnectionManager {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log(`[WebRTC] ICE candidate for ${peerId}: ${event.candidate.type ?? 'null'} ${event.candidate.candidate.substring(0, 60)}...`);
+        console.log(
+          `[WebRTC] ICE candidate for ${peerId}: ${event.candidate.type ?? "null"} ${event.candidate.candidate.substring(0, 60)}...`,
+        );
         if (this.onIceCandidate) {
           this.onIceCandidate(peerId, event.candidate);
         }
@@ -140,7 +165,9 @@ export class PeerConnectionManager {
     };
 
     pc.ontrack = (event) => {
-      console.log(`[WebRTC] Remote track received from ${peerId}: kind=${event.track.kind}`);
+      console.log(
+        `[WebRTC] Remote track received from ${peerId}: kind=${event.track.kind}`,
+      );
       if (event.streams.length > 0 && this.onRemoteStream) {
         this.onRemoteStream(peerId, event.streams[0]);
       }
@@ -152,7 +179,9 @@ export class PeerConnectionManager {
         // If using new API (config-based), auto-create offer and pass SDP
         if (this.config) {
           if (!this.shouldOffer(peerId)) {
-            console.log(`[WebRTC] Skipping negotiation for ${peerId} (remote peer should offer)`);
+            console.log(
+              `[WebRTC] Skipping negotiation for ${peerId} (remote peer should offer)`,
+            );
             return;
           }
           try {
@@ -160,7 +189,10 @@ export class PeerConnectionManager {
             await pc.setLocalDescription(offer);
             this.onNegotiationNeeded(peerId, offer);
           } catch (err) {
-            console.error(`[WebRTC] Failed to create offer during negotiation for ${peerId}:`, err);
+            console.error(
+              `[WebRTC] Failed to create offer during negotiation for ${peerId}:`,
+              err,
+            );
           }
         } else {
           // Legacy API: just notify the caller (voice store handles offer creation)
@@ -178,7 +210,7 @@ export class PeerConnectionManager {
         this.onPeerConnectionStateChanged(peerId, state);
       }
 
-      if (state === 'failed' || state === 'closed') {
+      if (state === "failed" || state === "closed") {
         if (this.onRemoteStreamRemoved) {
           this.onRemoteStreamRemoved(peerId);
         }
@@ -189,22 +221,26 @@ export class PeerConnectionManager {
       const iceState = pc.iceConnectionState;
       console.log(`[WebRTC] ICE connection state for ${peerId}: ${iceState}`);
 
-      if (iceState === 'disconnected') {
+      if (iceState === "disconnected") {
         // Start a timeout — if still disconnected after DISCONNECT_TIMEOUT_MS, attempt restart
         this.clearDisconnectTimer(peerState);
         peerState.disconnectTimer = setTimeout(() => {
           peerState.disconnectTimer = null;
-          if (pc.iceConnectionState === 'disconnected') {
-            console.log(`[WebRTC] Peer ${peerId} still disconnected after timeout, attempting ICE restart`);
+          if (pc.iceConnectionState === "disconnected") {
+            console.log(
+              `[WebRTC] Peer ${peerId} still disconnected after timeout, attempting ICE restart`,
+            );
             this.attemptIceRestart(peerId, peerState);
           }
         }, DISCONNECT_TIMEOUT_MS);
-      } else if (iceState === 'failed') {
+      } else if (iceState === "failed") {
         // Immediately attempt ICE restart
         this.clearDisconnectTimer(peerState);
-        console.log(`[WebRTC] ICE failed for ${peerId}, attempting ICE restart`);
+        console.log(
+          `[WebRTC] ICE failed for ${peerId}, attempting ICE restart`,
+        );
         this.attemptIceRestart(peerId, peerState);
-      } else if (iceState === 'connected' || iceState === 'completed') {
+      } else if (iceState === "connected" || iceState === "completed") {
         // Connection recovered — reset restart counter and clear timers
         this.clearDisconnectTimer(peerState);
         peerState.restartAttempts = 0;
@@ -212,7 +248,9 @@ export class PeerConnectionManager {
     };
 
     pc.onicegatheringstatechange = () => {
-      console.log(`[WebRTC] ICE gathering state for ${peerId}: ${pc.iceGatheringState}`);
+      console.log(
+        `[WebRTC] ICE gathering state for ${peerId}: ${pc.iceGatheringState}`,
+      );
     };
   }
 
@@ -223,20 +261,27 @@ export class PeerConnectionManager {
     }
   }
 
-  private async attemptIceRestart(peerId: string, peerState: PeerState): Promise<void> {
+  private async attemptIceRestart(
+    peerId: string,
+    peerState: PeerState,
+  ): Promise<void> {
     if (peerState.restartAttempts >= MAX_ICE_RESTART_ATTEMPTS) {
-      console.error(`[WebRTC] Max ICE restart attempts (${MAX_ICE_RESTART_ATTEMPTS}) reached for ${peerId}, giving up`);
+      console.error(
+        `[WebRTC] Max ICE restart attempts (${MAX_ICE_RESTART_ATTEMPTS}) reached for ${peerId}, giving up`,
+      );
       if (this.onRemoteStreamRemoved) {
         this.onRemoteStreamRemoved(peerId);
       }
       if (this.onPeerConnectionStateChanged) {
-        this.onPeerConnectionStateChanged(peerId, 'failed');
+        this.onPeerConnectionStateChanged(peerId, "failed");
       }
       return;
     }
 
     peerState.restartAttempts++;
-    console.log(`[WebRTC] ICE restart attempt ${peerState.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS} for ${peerId}`);
+    console.log(
+      `[WebRTC] ICE restart attempt ${peerState.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS} for ${peerId}`,
+    );
 
     try {
       const offer = await peerState.pc.createOffer({ iceRestart: true });
@@ -251,17 +296,25 @@ export class PeerConnectionManager {
   }
 
   /** Flush buffered ICE candidates after remote description is set */
-  private async flushCandidateBuffer(peerId: string, peerState: PeerState): Promise<void> {
+  private async flushCandidateBuffer(
+    peerId: string,
+    peerState: PeerState,
+  ): Promise<void> {
     if (peerState.candidateBuffer.length === 0) return;
 
-    console.log(`[WebRTC] Flushing ${peerState.candidateBuffer.length} buffered ICE candidates for ${peerId}`);
+    console.log(
+      `[WebRTC] Flushing ${peerState.candidateBuffer.length} buffered ICE candidates for ${peerId}`,
+    );
     const buffered = peerState.candidateBuffer.splice(0);
 
     for (const candidate of buffered) {
       try {
         await peerState.pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
-        console.error(`[WebRTC] Failed to add buffered ICE candidate for ${peerId}:`, err);
+        console.error(
+          `[WebRTC] Failed to add buffered ICE candidate for ${peerId}:`,
+          err,
+        );
       }
     }
   }
@@ -357,15 +410,20 @@ export class PeerConnectionManager {
   ): Promise<void> {
     const peerState = this.peers.get(peerId);
     if (!peerState) {
-      // Candidate arrived before connection was created — buffer it in a temporary queue
-      // that will be checked when the connection is created. For now, log and drop.
-      console.warn(`[WebRTC] ICE candidate arrived for unknown peer ${peerId}, ignoring`);
+      console.warn(
+        `[WebRTC] ICE candidate arrived for unknown peer ${peerId}, buffering until connection is created`,
+      );
+      const existing = this.unknownPeerCandidates.get(peerId) || [];
+      existing.push(candidate);
+      this.unknownPeerCandidates.set(peerId, existing);
       return;
     }
 
     // If remote description is not yet set, buffer the candidate
     if (!peerState.pc.remoteDescription) {
-      console.log(`[WebRTC] Buffering ICE candidate for ${peerId} (no remote description yet)`);
+      console.log(
+        `[WebRTC] Buffering ICE candidate for ${peerId} (no remote description yet)`,
+      );
       peerState.candidateBuffer.push(candidate);
       return;
     }
@@ -382,13 +440,17 @@ export class PeerConnectionManager {
   async restartIce(peerId: string): Promise<RTCSessionDescriptionInit | null> {
     const peerState = this.peers.get(peerId);
     if (!peerState) {
-      console.error(`[WebRTC] Cannot restart ICE: no connection for peer ${peerId}`);
+      console.error(
+        `[WebRTC] Cannot restart ICE: no connection for peer ${peerId}`,
+      );
       return null;
     }
 
     try {
       peerState.restartAttempts++;
-      console.log(`[WebRTC] Manual ICE restart for ${peerId} (attempt ${peerState.restartAttempts})`);
+      console.log(
+        `[WebRTC] Manual ICE restart for ${peerId} (attempt ${peerState.restartAttempts})`,
+      );
       const offer = await peerState.pc.createOffer({ iceRestart: true });
       await peerState.pc.setLocalDescription(offer);
       return offer;
@@ -406,7 +468,7 @@ export class PeerConnectionManager {
 
   // replaces tracks on all existing connections
   // overloaded: can be called with no args (legacy) or with (stream, kind) (new API)
-  updateTracks(stream?: MediaStream | null, kind?: 'audio' | 'video'): void {
+  updateTracks(stream?: MediaStream | null, kind?: "audio" | "video"): void {
     for (const [, peerState] of this.peers) {
       const { pc } = peerState;
       const senders = pc.getSenders();
@@ -438,16 +500,19 @@ export class PeerConnectionManager {
         if (!existingSender) {
           // check if there is a sender with the same kind we can replace
           const kindSender = senders.find(
-            (s) => s.track?.kind === track.kind || (s.track === null && track.kind !== undefined),
+            (s) =>
+              s.track?.kind === track.kind ||
+              (s.track === null && track.kind !== undefined),
           );
           if (kindSender) {
             kindSender.replaceTrack(track).catch((err) => {
-              console.error('[WebRTC] Failed to replace track:', err);
+              console.error("[WebRTC] Failed to replace track:", err);
             });
           } else {
             // no existing sender for this kind, add a new one
             const parentStream =
-              track.kind === 'video' && this.screenStream?.getVideoTracks().includes(track)
+              track.kind === "video" &&
+              this.screenStream?.getVideoTracks().includes(track)
                 ? this.screenStream
                 : this.localStream;
             if (parentStream) {
@@ -464,7 +529,7 @@ export class PeerConnectionManager {
           try {
             pc.removeTrack(sender);
           } catch (err) {
-            console.error('[WebRTC] Failed to remove track:', err);
+            console.error("[WebRTC] Failed to remove track:", err);
           }
         }
       }

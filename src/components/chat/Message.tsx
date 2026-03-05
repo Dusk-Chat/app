@@ -1,7 +1,7 @@
 import type { Component } from "solid-js";
 import { Show, createSignal, createMemo } from "solid-js";
 import type { ChatMessage } from "../../lib/types";
-import { formatTime } from "../../lib/utils";
+import { formatTime, formatTimeShort } from "../../lib/utils";
 import { renderMarkdown, getStandaloneMediaKind } from "../../lib/markdown";
 import type { MediaKind } from "../../lib/markdown";
 import { removeMessage } from "../../stores/messages";
@@ -115,14 +115,20 @@ const Message: Component<MessageProps> = (props) => {
   return (
     <div
       data-message-id={props.message.id}
-      class={`flex items-start gap-4 transition-colors duration-200 px-4 ${
+      class={`group/msg flex items-start gap-4 transition-colors duration-200 px-4 ${
         mentionsMe() ? "dusk-msg-mentioned" : "hover:bg-gray-900"
       } ${props.isFirstInGroup ? "pt-2" : "pt-0.5"} ${props.isLastInGroup ? "pb-2" : "pb-0.5"}`}
       onContextMenu={handleContextMenu}
     >
       <Show
         when={props.isFirstInGroup}
-        fallback={<div class="w-10 shrink-0" />}
+        fallback={
+          <div class="w-10 shrink-0 text-center select-none opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200 pt-[2px]">
+            <span class="text-[10px] sm:text-[11px] font-mono text-white/30 truncate block">
+              {formatTimeShort(props.message.timestamp) || ""}
+            </span>
+          </div>
+        }
       >
         <button
           type="button"

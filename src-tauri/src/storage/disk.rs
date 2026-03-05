@@ -31,7 +31,9 @@ pub struct UserSettings {
     pub relay_discoverable: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for UserSettings {
     fn default() -> Self {

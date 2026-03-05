@@ -16,7 +16,7 @@ const Button: Component<ButtonProps> = (props) => {
   const size = () => props.size ?? "md";
 
   const baseStyles =
-    "inline-flex items-center justify-center font-medium uppercase tracking-[0.05em] transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] cursor-pointer select-none";
+    "inline-flex items-center justify-center font-medium uppercase tracking-[0.05em] transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-offset-2 focus-visible:ring-offset-black";
 
   const variantStyles = () => {
     switch (variant()) {

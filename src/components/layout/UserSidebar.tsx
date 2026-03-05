@@ -104,7 +104,7 @@ const UserSidebar: Component = () => {
               {(member) => (
                 <button
                   type="button"
-                  class="flex items-center gap-3 w-full h-10 px-4 text-left hover:bg-gray-800 transition-colors duration-200 cursor-pointer group"
+                  class="flex items-center gap-3 w-full h-10 px-4 text-left hover:bg-gray-800 transition-colors duration-200 cursor-pointer group focus-visible:outline-none focus-visible:bg-gray-800"
                   onClick={(e) => {
                     openProfileCard({
                       peerId: member.peer_id,

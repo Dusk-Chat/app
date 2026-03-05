@@ -31,7 +31,7 @@ const OverlayMenu: Component<OverlayMenuProps> = (props) => {
 
   return (
     <Show when={props.isOpen}>
-      <div class="fixed inset-0 z-[1000] bg-black flex flex-col animate-fade-in">
+      <div role="dialog" aria-modal="true" class="fixed inset-0 z-[1000] bg-black flex flex-col animate-fade-in">
         {/* close button */}
         <div class="flex justify-end p-6">
           <button

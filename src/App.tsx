@@ -21,6 +21,8 @@ import UserDirectoryModal from "./components/directory/UserDirectoryModal";
 import ProfileCard from "./components/common/ProfileCard";
 import ProfileModal from "./components/common/ProfileModal";
 import { AlertTriangle } from "lucide-solid";
+import { validateEffect, type ProfileEffect } from "./lib/effects";
+import { cachePeerEffects } from "./stores/effects";
 
 import {
   overlayMenuOpen,
@@ -467,6 +469,18 @@ const App: Component = () => {
           event.payload.peer_id,
           event.payload.display_name,
         );
+        // cache peer effects if present
+        if (event.payload.effects) {
+          const validated: Record<string, ProfileEffect | undefined> = {};
+          for (const trigger of ["click", "hover", "entrance"] as const) {
+            const raw = event.payload.effects[trigger];
+            if (raw) {
+              const effect = validateEffect(raw);
+              if (effect) validated[trigger] = effect;
+            }
+          }
+          cachePeerEffects(event.payload.peer_id, validated);
+        }
         break;
       case "profile_revoked":
         // peer revoked their identity, remove them from our local directory

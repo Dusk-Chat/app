@@ -21,7 +21,9 @@ import {
   Info,
 } from "lucide-solid";
 import Avatar from "./Avatar";
+import ProfileEffectRenderer from "./ProfileEffectRenderer";
 import { profileModalPeerId, closeProfileModal } from "../../stores/ui";
+import { getUserEffect, getPeerEffects } from "../../stores/effects";
 import { members, isPeerOnline } from "../../stores/members";
 import {
   knownPeers,
@@ -110,6 +112,34 @@ const ProfileModal: Component = () => {
     return 0;
   };
 
+  // resolve profile effects for the viewed peer
+  const clickEffect = createMemo(() => {
+    const id = peerId();
+    if (!id) return undefined;
+    if (id === identity()?.peer_id) {
+      return getUserEffect("click");
+    }
+    return getPeerEffects(id)?.click;
+  });
+
+  const hoverEffect = createMemo(() => {
+    const id = peerId();
+    if (!id) return undefined;
+    if (id === identity()?.peer_id) {
+      return getUserEffect("hover");
+    }
+    return getPeerEffects(id)?.hover;
+  });
+
+  const entranceEffect = createMemo(() => {
+    const id = peerId();
+    if (!id) return undefined;
+    if (id === identity()?.peer_id) {
+      return getUserEffect("entrance");
+    }
+    return getPeerEffects(id)?.entrance;
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") closeProfileModal();
   }
@@ -179,7 +209,7 @@ const ProfileModal: Component = () => {
       <Portal>
         <div
           class="fixed inset-0 z-1000 flex items-center justify-center bg-black/80 animate-fade-in"
-          onClick={handleBackdropClick}
+          onMouseDown={handleBackdropClick}
         >
           <div class="bg-gray-900 border-2 border-white/20 w-full max-w-130 mx-4 animate-scale-in relative overflow-hidden">
             {/* banner */}
@@ -193,15 +223,75 @@ const ProfileModal: Component = () => {
               </button>
             </div>
 
+            {/* entrance effect overlay */}
+            <Show when={entranceEffect()}>
+              <div class="absolute inset-0 z-10 pointer-events-none">
+                <ProfileEffectRenderer
+                  effect={entranceEffect()}
+                  trigger="entrance"
+                  size={520}
+                  scope="card"
+                >
+                  <div />
+                </ProfileEffectRenderer>
+              </div>
+            </Show>
+
+            {/* hover effect overlay */}
+            <Show when={hoverEffect()}>
+              <div class="absolute inset-0 z-10 pointer-events-none">
+                <ProfileEffectRenderer
+                  effect={hoverEffect()}
+                  trigger="entrance"
+                  size={520}
+                  scope="card"
+                >
+                  <div />
+                </ProfileEffectRenderer>
+              </div>
+            </Show>
+
+            {/* click effect overlay */}
+            <Show when={clickEffect()}>
+              <div class="absolute inset-0 z-10 pointer-events-none">
+                <ProfileEffectRenderer
+                  effect={clickEffect()}
+                  trigger="entrance"
+                  size={520}
+                  scope="card"
+                >
+                  <div />
+                </ProfileEffectRenderer>
+              </div>
+            </Show>
+
             {/* avatar overlapping banner */}
             <div class="px-6 -mt-10 flex items-end gap-4">
               <div class="shrink-0">
-                <Avatar
-                  name={displayName()}
-                  size="xl"
-                  status={status()}
-                  showStatus
-                />
+                <ProfileEffectRenderer
+                  effect={entranceEffect()}
+                  trigger="entrance"
+                  size={64}
+                >
+                  <ProfileEffectRenderer
+                    effect={hoverEffect()}
+                    trigger="entrance"
+                    size={64}
+                  >
+                    <ProfileEffectRenderer
+                      effect={clickEffect()}
+                      trigger="entrance"
+                      size={64}
+                    >
+                      <Avatar
+                        name={displayName()}
+                        size="xl"
+                        status={status()}
+                        showStatus
+                      />
+                    </ProfileEffectRenderer>
+                  </ProfileEffectRenderer>
+                </ProfileEffectRenderer>
               </div>
               <div class="pb-1 min-w-0 flex-1">
                 <div class="flex items-center gap-2">

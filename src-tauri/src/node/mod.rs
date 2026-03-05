@@ -54,13 +54,9 @@ pub fn validate_relay_multiaddr(
         return Err("relay address cannot be empty".to_string());
     }
 
-    let multiaddr = trimmed.parse::<libp2p::Multiaddr>().map_err(|e| {
-        format!(
-            "invalid relay multiaddr '{}': {}",
-            trimmed,
-            e
-        )
-    })?;
+    let multiaddr = trimmed
+        .parse::<libp2p::Multiaddr>()
+        .map_err(|e| format!("invalid relay multiaddr '{}': {}", trimmed, e))?;
 
     let peer_id = peer_id_from_multiaddr(&multiaddr).ok_or_else(|| {
         format!(
@@ -103,11 +99,7 @@ fn resolve_relay_config(custom_addr: Option<&str>) -> Option<RelayConfig> {
                 });
             }
             Err(e) => {
-                log::warn!(
-                    "ignoring invalid relay address from {}: {}",
-                    source,
-                    e
-                );
+                log::warn!("ignoring invalid relay address from {}: {}", source, e);
             }
         }
     }
@@ -127,11 +119,7 @@ fn bootstrap_peers(relay_config: Option<&RelayConfig>) -> Vec<(libp2p::Multiaddr
     }
 
     if let Ok(raw) = std::env::var(DUSK_BOOTSTRAP_PEERS_ENV) {
-        for addr in raw
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
+        for addr in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             match validate_relay_multiaddr(addr) {
                 Ok((multiaddr, peer_id)) => {
                     let key = format!("{}|{}", multiaddr, peer_id);
@@ -225,7 +213,9 @@ pub enum NodeCommand {
     },
     // request time-limited TURN server credentials from the relay
     GetTurnCredentials {
-        reply: tokio::sync::oneshot::Sender<Result<crate::protocol::turn::TurnCredentialResponse, String>>,
+        reply: tokio::sync::oneshot::Sender<
+            Result<crate::protocol::turn::TurnCredentialResponse, String>,
+        >,
     },
 }
 
@@ -474,15 +464,17 @@ pub async fn start(
         let mut kad_bootstrap_tick =
             tokio::time::interval(std::time::Duration::from_secs(KAD_BOOTSTRAP_TICK_SECS));
 
-        // all namespaces we should keep active for rendezvous register + rediscover
-        let mut active_namespaces: HashSet<String> = HashSet::new();
+        // namespaces we actively register under
+        let mut register_namespaces: HashSet<String> = HashSet::new();
+
+        // namespaces we actively discover
+        let mut discover_namespaces: HashSet<String> = HashSet::new();
 
         // pending gif search replies keyed by request_response request id
         let mut pending_gif_replies: HashMap<
             libp2p::request_response::OutboundRequestId,
             tokio::sync::oneshot::Sender<Result<crate::protocol::gif::GifResponse, String>>,
         > = HashMap::new();
-
 
         // pending directory search replies keyed by request_response request id
         let mut pending_directory_replies: HashMap<
@@ -863,6 +855,31 @@ pub async fn start(
                                             community_id, channel_id, peer_id,
                                         });
                                     }
+                                    crate::protocol::messages::GossipMessage::VoiceParticipantsRequest {
+                                        community_id, channel_id,
+                                    } => {
+                                        // A peer has joined and is requesting the current participants.
+                                        // If we are currently in this channel, we should rebroadcast our VoiceJoin.
+                                        let key = format!("{}:{}", community_id, channel_id);
+                                        let local_id = swarm_instance.local_peer_id().to_string();
+
+                                        let vc = voice_channels.lock().await;
+                                        if let Some(participants) = vc.get(&key) {
+                                            if let Some(me) = participants.iter().find(|p| p.peer_id == local_id) {
+                                                let join_msg = crate::protocol::messages::GossipMessage::VoiceJoin {
+                                                    community_id: community_id.clone(),
+                                                    channel_id: channel_id.clone(),
+                                                    peer_id: me.peer_id.clone(),
+                                                    display_name: me.display_name.clone(),
+                                                    media_state: me.media_state.clone(),
+                                                };
+
+                                                let payload = serde_json::to_vec(&join_msg).unwrap_or_default();
+                                                let topic = libp2p::gossipsub::IdentTopic::new(crate::node::gossip::topic_for_voice(&community_id, &channel_id));
+                                                let _ = swarm_instance.behaviour_mut().gossipsub.publish(topic, payload);
+                                            }
+                                        }
+                                    }
                                     crate::protocol::messages::GossipMessage::VoiceMediaStateUpdate {
                                         community_id, channel_id, peer_id, media_state,
                                     } => {
@@ -1101,7 +1118,7 @@ pub async fn start(
                                 "rendezvous register success for namespace '{}'",
                                 namespace
                             );
-                            active_namespaces.insert(namespace.to_string());
+                            register_namespaces.insert(namespace.to_string());
                         }
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::Rendezvous(
                             libp2p::rendezvous::client::Event::Discovered { registrations, cookie, .. }
@@ -1458,11 +1475,11 @@ pub async fn start(
                     }
                 }
 
-                // periodic rendezvous re-registration (registrations expire on the server)
+                // periodic rendezvous re-registration/rediscovery (expires on the server)
                 _ = rendezvous_tick.tick() => {
                     if relay_reservation_active {
                         if let Some(rp) = relay_peer {
-                            for ns in active_namespaces.clone() {
+                            for ns in register_namespaces.clone() {
                                 match libp2p::rendezvous::Namespace::new(ns.clone()) {
                                     Ok(namespace) => {
                                         log::info!(
@@ -1483,13 +1500,15 @@ pub async fn start(
                                     }
                                     Err(e) => {
                                         log::warn!(
-                                            "invalid active rendezvous namespace '{}' during refresh: {:?}",
+                                            "invalid register rendezvous namespace '{}' during refresh: {:?}",
                                             ns,
                                             e
                                         );
                                     }
                                 }
+                            }
 
+                            for ns in discover_namespaces.clone() {
                                 match libp2p::rendezvous::Namespace::new(ns.clone()) {
                                     Ok(namespace) => {
                                         log::info!(
@@ -1666,7 +1685,7 @@ pub async fn start(
                             }
                         }
                         Some(NodeCommand::RegisterRendezvous { namespace }) => {
-                            active_namespaces.insert(namespace.clone());
+                            register_namespaces.insert(namespace.clone());
                             if relay_reservation_active {
                                 if let Some(rp) = relay_peer {
                                     match libp2p::rendezvous::Namespace::new(namespace.clone()) {
@@ -1691,7 +1710,7 @@ pub async fn start(
                             }
                         }
                         Some(NodeCommand::DiscoverRendezvous { namespace }) => {
-                            active_namespaces.insert(namespace.clone());
+                            discover_namespaces.insert(namespace.clone());
                             if relay_reservation_active {
                                 if let Some(rp) = relay_peer {
                                     match libp2p::rendezvous::Namespace::new(namespace.clone()) {
@@ -1724,7 +1743,8 @@ pub async fn start(
                             if pending_registrations.is_empty() && pending_discoveries.is_empty() {
                                 pending_queued_at = None;
                             }
-                            active_namespaces.remove(&namespace);
+                            register_namespaces.remove(&namespace);
+                            discover_namespaces.remove(&namespace);
 
                             if relay_reservation_active {
                                 if let Some(rp) = relay_peer {

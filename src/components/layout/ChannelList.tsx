@@ -96,7 +96,7 @@ const SortableChannel: Component<SortableChannelProps> = (props) => {
       </Show>
       <div
         ref={sortable.ref}
-        class={`flex items-center gap-2 w-full h-10 pr-2 pl-3 text-[16px] transition-all duration-200 cursor-pointer group ${getContainerClass()} ${
+        class={`flex items-center gap-2 w-full h-10 pr-2 pl-3 text-[16px] transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange group ${getContainerClass()} ${
           sortable.isActiveDraggable ? "opacity-40" : ""
         }`}
         onClick={props.onClick}
@@ -235,7 +235,7 @@ const ChannelList: Component = () => {
     <div class="flex items-center justify-between pr-2">
       <button
         type="button"
-        class="flex items-center gap-1 flex-1 px-2 py-1.5 text-[12px] font-mono font-medium uppercase tracking-[0.05em] text-white/60 hover:text-white/80 transition-colors duration-200 cursor-pointer select-none"
+        class="flex items-center gap-1 flex-1 px-2 py-1.5 text-[12px] font-mono font-medium uppercase tracking-[0.05em] text-white/60 hover:text-white/80 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange select-none"
         onClick={() => toggleSection(props.sectionId)}
       >
         <ChevronDown
@@ -252,7 +252,7 @@ const ChannelList: Component = () => {
       <Show when={props.showAdd && community()}>
         <button
           type="button"
-          class="text-white/30 hover:text-white/60 transition-colors duration-200 cursor-pointer"
+          class="text-white/30 hover:text-white/60 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange"
           onClick={() => openModal("create-channel")}
         >
           <Plus size={14} />
@@ -384,7 +384,7 @@ const ChannelList: Component = () => {
     <div class="h-15 border-b border-white/10 flex flex-col justify-end">
       <div
         ref={headerRef}
-        class="h-12 flex items-center justify-between px-4 cursor-pointer hover:bg-white/5 transition-colors duration-200"
+        class="h-12 flex items-center justify-between px-4 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange hover:bg-white/5 transition-colors duration-200"
         onClick={() => {
           if (community()) setServerDropdownOpen((v) => !v);
         }}
@@ -486,7 +486,7 @@ const ChannelList: Component = () => {
           <div class="px-2 mt-2">
             <button
               type="button"
-              class="flex items-center gap-2 w-full px-3 py-2 text-[14px] text-white/40 hover:text-white/60 transition-colors duration-200 cursor-pointer"
+              class="flex items-center gap-2 w-full px-3 py-2 text-[14px] text-white/40 hover:text-white/60 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange"
               onClick={() => openModal("create-channel")}
             >
               <Plus size={14} />
@@ -500,7 +500,7 @@ const ChannelList: Component = () => {
           <div class="px-2 mt-3 border-t border-white/5 pt-3">
             <button
               type="button"
-              class="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] font-mono text-white/30 hover:text-white/50 transition-colors duration-200 cursor-pointer"
+              class="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] font-mono text-white/30 hover:text-white/50 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange"
               onClick={() => openModal("create-category")}
             >
               <FolderPlus size={12} />
@@ -534,7 +534,7 @@ const ChannelList: Component = () => {
           </div>
           <button
             type="button"
-            class="p-1.5 text-white/40 hover:text-red-400 transition-colors duration-200 cursor-pointer"
+            class="p-1.5 text-white/40 hover:text-red-400 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange"
             onClick={() => leaveVoice()}
             title="Disconnect"
           >
@@ -544,7 +544,7 @@ const ChannelList: Component = () => {
         <div class="flex items-center justify-center gap-1 px-3 pb-2">
           <button
             type="button"
-            class={`flex items-center justify-center w-8 h-8 transition-colors duration-200 cursor-pointer ${
+            class={`flex items-center justify-center w-8 h-8 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange ${
               localMediaState().muted
                 ? "bg-red-500/20 text-red-400"
                 : "text-white/60 hover:text-white hover:bg-white/10"
@@ -558,7 +558,7 @@ const ChannelList: Component = () => {
           </button>
           <button
             type="button"
-            class={`flex items-center justify-center w-8 h-8 transition-colors duration-200 cursor-pointer ${
+            class={`flex items-center justify-center w-8 h-8 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange ${
               localMediaState().deafened
                 ? "bg-red-500/20 text-red-400"
                 : "text-white/60 hover:text-white hover:bg-white/10"

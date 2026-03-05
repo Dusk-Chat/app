@@ -34,8 +34,8 @@ const Modal: Component<ModalProps> = (props) => {
           class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 animate-fade-in"
           onClick={handleBackdropClick}
         >
-          <div class="bg-gray-900 border-2 border-white/20 p-8 w-full max-w-[480px] mx-4 animate-scale-in relative">
-            <button
+          <div role="dialog" aria-modal="true" aria-labelledby="modal-title" class="bg-gray-900 border-2 border-white/20 p-8 w-full max-w-[480px] mx-4 animate-scale-in relative">
+            <button aria-label="Close modal"
               type="button"
               class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-white/60 hover:text-white transition-colors duration-200 cursor-pointer"
               onClick={props.onClose}
@@ -43,7 +43,7 @@ const Modal: Component<ModalProps> = (props) => {
               <X size={20} />
             </button>
 
-            <h2 class="text-[24px] leading-[32px] font-bold text-white mb-6">
+            <h2 id="modal-title" class="text-[24px] leading-[32px] font-bold text-white mb-6">
               {props.title}
             </h2>
 

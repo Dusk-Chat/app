@@ -58,7 +58,7 @@ pub async fn join_voice_channel(
         handle
             .command_tx
             .send(NodeCommand::SendMessage {
-                topic: voice_topic,
+                topic: voice_topic.clone(),
                 data,
             })
             .await
@@ -67,7 +67,25 @@ pub async fn join_voice_channel(
                 format!("Failed to send voice join announcement: {}", e)
             })?;
 
-        eprintln!("[Voice] Successfully published VoiceJoin for peer {}", peer_id);
+        // publish a request for existing participants to announce themselves
+        let req_msg = GossipMessage::VoiceParticipantsRequest {
+            community_id: community_id.clone(),
+            channel_id: channel_id.clone(),
+        };
+        if let Ok(req_data) = serde_json::to_vec(&req_msg) {
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::SendMessage {
+                    topic: gossip::topic_for_voice(&community_id, &channel_id),
+                    data: req_data,
+                })
+                .await;
+        }
+
+        eprintln!(
+            "[Voice] Successfully published VoiceJoin for peer {}",
+            peer_id
+        );
     } else {
         eprintln!("[Voice] No node handle available — cannot join voice channel");
         return Err("Node not running — cannot join voice channel".to_string());
@@ -86,16 +104,6 @@ pub async fn join_voice_channel(
 
     let result = participants.clone();
     drop(vc);
-
-    // TODO: Participant list race condition
-    // The participant list returned here only includes locally-tracked peers.
-    // A newly joining peer will not see existing participants until they receive
-    // VoiceJoin gossip messages from those peers. To fix this properly, we need:
-    //   1. A new GossipMessage::VoiceParticipantsRequest variant
-    //   2. Existing peers respond to the request by re-broadcasting their VoiceJoin
-    //   3. Or implement a request/response protocol over gossipsub or a direct stream
-    // This requires changes to protocol/messages.rs and node/mod.rs (gossip handler).
-    // For now, the frontend should handle late-arriving VoiceJoin events gracefully.
 
     log::info!("joined voice channel {}:{}", community_id, channel_id);
 
@@ -141,7 +149,10 @@ pub async fn leave_voice_channel(
                 format!("Failed to send voice leave announcement: {}", e)
             })?;
 
-        eprintln!("[Voice] Successfully published VoiceLeave for peer {}", peer_id);
+        eprintln!(
+            "[Voice] Successfully published VoiceLeave for peer {}",
+            peer_id
+        );
 
         // unsubscribe from the voice topic
         handle
@@ -212,7 +223,10 @@ pub async fn update_voice_media_state(
                 format!("Failed to send media state update: {}", e)
             })?;
 
-        eprintln!("[Voice] Successfully published VoiceMediaStateUpdate for peer {}", peer_id);
+        eprintln!(
+            "[Voice] Successfully published VoiceMediaStateUpdate for peer {}",
+            peer_id
+        );
     } else {
         eprintln!("[Voice] No node handle available — cannot update media state");
         return Err("Node not running — cannot update media state".to_string());
@@ -286,7 +300,10 @@ pub async fn send_voice_sdp(
                 format!("Failed to send voice SDP: {}", e)
             })?;
 
-        eprintln!("[Voice] Successfully published VoiceSdp from peer {}", from_peer);
+        eprintln!(
+            "[Voice] Successfully published VoiceSdp from peer {}",
+            from_peer
+        );
     } else {
         eprintln!("[Voice] No node handle available — cannot send SDP");
         return Err("Node not running — cannot send SDP".to_string());
@@ -340,7 +357,10 @@ pub async fn send_voice_ice_candidate(
                 format!("Failed to send voice ICE candidate: {}", e)
             })?;
 
-        eprintln!("[Voice] Successfully published VoiceIceCandidate from peer {}", from_peer);
+        eprintln!(
+            "[Voice] Successfully published VoiceIceCandidate from peer {}",
+            from_peer
+        );
     } else {
         eprintln!("[Voice] No node handle available — cannot send ICE candidate");
         return Err("Node not running — cannot send ICE candidate".to_string());

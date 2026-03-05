@@ -302,6 +302,7 @@ const MessageInput: Component<MessageInputProps> = (props) => {
         {/* action buttons pinned to the right */}
         <div class="dusk-editor-actions">
           <button
+            aria-label="emoji"
             type="button"
             class={`dusk-toolbar-btn ${showEmojiPicker() ? "active" : ""}`}
             onClick={toggleEmojiPicker}
@@ -310,6 +311,7 @@ const MessageInput: Component<MessageInputProps> = (props) => {
             <Smile size={20} />
           </button>
           <button
+            aria-label="gif"
             type="button"
             class={`dusk-toolbar-btn ${showGifPicker() ? "active" : ""}`}
             onClick={toggleGifPicker}
@@ -318,6 +320,7 @@ const MessageInput: Component<MessageInputProps> = (props) => {
             <Image size={20} />
           </button>
           <button
+            aria-label="send message"
             type="button"
             class="dusk-send-btn"
             onClick={handleSubmit}

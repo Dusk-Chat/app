@@ -215,6 +215,11 @@ export type DuskEvent =
         display_name: string;
         bio: string;
         public_key: string;
+        effects?: {
+          click?: unknown;
+          hover?: unknown;
+          entrance?: unknown;
+        };
       };
     }
   | { kind: "profile_revoked"; payload: { peer_id: string } }

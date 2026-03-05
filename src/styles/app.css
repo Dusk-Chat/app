@@ -741,3 +741,109 @@ body {
   object-fit: contain;
   outline: none;
 }
+
+/* ============================================================
+   profile effects editor
+   ============================================================ */
+.dusk-effect-editor {
+  display: grid;
+  grid-template-areas:
+    "top top top"
+    "library canvas properties"
+    "timeline timeline timeline";
+  grid-template-columns: 200px 1fr 240px;
+  grid-template-rows: auto 1fr 180px;
+  height: 100%;
+  min-height: 0;
+}
+
+.dusk-keyframe-diamond {
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.dusk-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-accent);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.dusk-canvas-grid {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.dusk-transform-handle {
+  width: 6px;
+  height: 6px;
+  background: var(--color-accent);
+  position: absolute;
+  cursor: pointer;
+}
+
+.dusk-motion-path {
+  stroke: rgba(255,255,255,0.2);
+  stroke-dasharray: 4 4;
+  fill: none;
+  stroke-width: 1;
+}
+
+.dusk-drag-input {
+  cursor: ew-resize;
+  user-select: none;
+}
+
+.dusk-easing-canvas {
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: crosshair;
+}
+
+.dusk-preset-card {
+  border: 2px solid rgba(255,255,255,0.1);
+  transition: border-color var(--transition-fast);
+  cursor: pointer;
+}
+
+.dusk-preset-card:hover {
+  border-color: rgba(255,255,255,0.25);
+}
+
+.dusk-preset-card.active {
+  border-color: var(--color-accent);
+}
+
+/* Global Accessibility Focus Rings */
+:focus-visible {
+  outline: 2px solid var(--color-orange);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-orange);
+  outline-offset: 2px;
+}
+
+/* Markdown Typography Refinements */
+.dusk-msg-code {
+  border-radius: 4px;
+}
+
+.dusk-msg-content {
+  line-height: 1.5; /* Slightly tighter than 22px for chat feel, typical is 1.4-1.5 */
+}
+
+/* Global Firefox Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+

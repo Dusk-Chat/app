@@ -103,7 +103,7 @@ const CommunitySettingsModal: Component<CommunitySettingsModalProps> = (
     <Show when={props.isOpen}>
       <Portal>
         <div class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/90 animate-fade-in">
-          <div class="bg-gray-900 border-2 border-white/20 w-full max-w-[800px] h-[600px] mx-4 animate-scale-in flex overflow-hidden">
+          <div role="dialog" aria-modal="true" class="bg-gray-900 border-2 border-white/20 w-full max-w-[800px] h-[600px] mx-4 animate-scale-in flex overflow-hidden">
             {/* sidebar navigation */}
             <div class="w-[200px] shrink-0 bg-black border-r border-white/10 flex flex-col">
               <div class="p-4 border-b border-white/10">

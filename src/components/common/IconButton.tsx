@@ -16,7 +16,7 @@ const IconButton: Component<IconButtonProps> = (props) => {
     <button
       type="button"
       aria-label={props.label}
-      class={`inline-flex items-center justify-center shrink-0 transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] cursor-pointer ${
+      class={`inline-flex items-center justify-center shrink-0 transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-offset-2 focus-visible:ring-offset-black ${
         props.active
           ? "bg-orange text-white"
           : "bg-gray-800 text-white/60 hover:bg-orange hover:text-white"

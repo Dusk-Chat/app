@@ -135,6 +135,10 @@ pub enum GossipMessage {
         channel_id: String,
         peer_id: String,
     },
+    VoiceParticipantsRequest {
+        community_id: String,
+        channel_id: String,
+    },
     VoiceMediaStateUpdate {
         community_id: String,
         channel_id: String,

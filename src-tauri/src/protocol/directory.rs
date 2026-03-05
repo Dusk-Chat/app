@@ -3,8 +3,7 @@
 
 use libp2p::StreamProtocol;
 
-pub const DIRECTORY_PROTOCOL: StreamProtocol =
-    StreamProtocol::new("/dusk/directory/1.0.0");
+pub const DIRECTORY_PROTOCOL: StreamProtocol = StreamProtocol::new("/dusk/directory/1.0.0");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum DirectoryRequest {

@@ -15,12 +15,13 @@ const ServerList: Component = () => {
     dmConversations().reduce((total, dm) => total + dm.unread_count, 0);
 
   return (
-    <div class="w-16 shrink-0 border-r bg-black flex flex-col items-center py-3 gap-2 overflow-y-auto no-select">
+    <div class="w-16 shrink-0 border-r border-[#1a1a1a] bg-black flex flex-col items-center py-3 gap-2 overflow-y-auto select-none overflow-x-hidden">
       {/* home button */}
       <div class="relative">
         <button
+          aria-label="Action"
           type="button"
-          class={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
+          class={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-inset ${
             activeCommunityId() === null
               ? "bg-orange text-white"
               : "bg-gray-800 text-white/60 hover:bg-gray-800 hover:text-white hover:scale-105"
@@ -49,8 +50,9 @@ const ServerList: Component = () => {
               <div class="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 w-1 h-8 bg-orange rounded-r" />
             </Show>
             <button
+              aria-label="Action"
               type="button"
-              class={`w-12 h-12 flex items-center justify-center text-[14px] font-bold transition-all duration-200 cursor-pointer hover:scale-105 ${
+              class={`w-12 h-12 flex items-center justify-center text-[14px] font-bold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-inset hover:scale-105 ${
                 activeCommunityId() === community.id ? "ring-2 ring-orange" : ""
               }`}
               style={{ background: hashColor(community.name) }}
@@ -70,8 +72,9 @@ const ServerList: Component = () => {
 
       {/* create community button */}
       <button
+        aria-label="Action"
         type="button"
-        class="w-12 h-12 flex items-center justify-center bg-gray-800 text-white/40 hover:bg-orange hover:text-white transition-all duration-200 cursor-pointer"
+        class="w-12 h-12 flex items-center justify-center bg-gray-800 text-white/40 hover:bg-orange hover:text-white transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-inset"
         onClick={() => openModal("create-community")}
         title="create community"
       >
@@ -80,8 +83,9 @@ const ServerList: Component = () => {
 
       {/* join community button */}
       <button
+        aria-label="Action"
         type="button"
-        class="w-12 h-12 flex items-center justify-center bg-gray-800 text-white/40 hover:bg-orange hover:text-white transition-all duration-200 cursor-pointer"
+        class="w-12 h-12 flex items-center justify-center bg-gray-800 text-white/40 hover:bg-orange hover:text-white transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-inset"
         onClick={() => openModal("join-community")}
         title="join community"
       >

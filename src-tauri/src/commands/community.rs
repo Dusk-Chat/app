@@ -192,7 +192,11 @@ pub async fn join_community(
         let mut engine = state.crdt_engine.lock().await;
         let had_existing_doc = engine.has_community(&invite.community_id);
         if !had_existing_doc {
-            engine.create_placeholder_community(&invite.community_id, &invite.community_name, "")?;
+            engine.create_placeholder_community(
+                &invite.community_id,
+                &invite.community_name,
+                "",
+            )?;
         }
 
         // joining via invite must never keep elevated local roles from stale local docs

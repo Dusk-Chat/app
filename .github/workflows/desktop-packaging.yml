@@ -6,17 +6,18 @@ on:
     tags:
       - "v*"
   pull_request:
-    paths:
-      - "app/**"
-      - "app/.gitea/workflows/**"
+
+permissions:
+  contents: read
 
 jobs:
   bundle:
     name: Bundle (${{ matrix.name }})
     runs-on: ${{ matrix.runner_labels }}
-    defaults:
-      run:
-        working-directory: app
+    timeout-minutes: 60
+    concurrency:
+      group: desktop-packaging-${{ github.ref }}-${{ matrix.name }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
@@ -49,36 +50,33 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> src-tauri/target
+
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           if command -v apt-get >/dev/null 2>&1; then
+            apt_cmd="apt-get"
             if command -v sudo >/dev/null 2>&1; then
-              sudo apt-get update
-              sudo apt-get install -y \
-                libwebkit2gtk-4.1-dev \
-                build-essential \
-                curl \
-                wget \
-                file \
-                libxdo-dev \
-                libssl-dev \
-                libayatana-appindicator3-dev \
-                librsvg2-dev
-            else
-              apt-get update
-              apt-get install -y \
-                libwebkit2gtk-4.1-dev \
-                build-essential \
-                curl \
-                wget \
-                file \
-                libxdo-dev \
-                libssl-dev \
-                libayatana-appindicator3-dev \
-                librsvg2-dev
+              apt_cmd="sudo apt-get"
             fi
+
+            ${apt_cmd} update
+            ${apt_cmd} install -y \
+              libwebkit2gtk-4.1-dev \
+              build-essential \
+              curl \
+              wget \
+              file \
+              libxdo-dev \
+              libssl-dev \
+              libayatana-appindicator3-dev \
+              librsvg2-dev
           else
             echo "apt-get not available; assuming Linux runner dependencies are preinstalled"
           fi
@@ -90,14 +88,14 @@ jobs:
         run: bun run ${{ matrix.package_script }}
 
       - name: Prepare artifact directory
-        run: mkdir -p ../ci-artifacts
+        run: mkdir -p ci-artifacts
 
       - name: Create artifact archive (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           set -euo pipefail
           test -d src-tauri/target/release/bundle
-          tar -C src-tauri/target/release -czf ../ci-artifacts/${{ matrix.artifact_file }} bundle
+          tar -C src-tauri/target/release -czf ci-artifacts/${{ matrix.artifact_file }} bundle
 
       - name: Create artifact archive (Windows)
         if: runner.os == 'Windows'
@@ -106,18 +104,11 @@ jobs:
           if (!(Test-Path "src-tauri/target/release/bundle")) {
             throw "Bundle output directory not found: src-tauri/target/release/bundle"
           }
-          Compress-Archive -Path "src-tauri/target/release/bundle/*" -DestinationPath "../ci-artifacts/${{ matrix.artifact_file }}" -Force
+          Compress-Archive -Path "src-tauri/target/release/bundle/*" -DestinationPath "ci-artifacts/${{ matrix.artifact_file }}" -Force
 
-      - name: Upload bundle artifact (Gitea-compatible, best effort)
-        continue-on-error: true
+      - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           if-no-files-found: error
           path: ci-artifacts/${{ matrix.artifact_file }}
-
-      - name: Print fallback artifact location on runner
-        if: always()
-        run: |
-          echo "fallback artifacts directory on runner: ${GITHUB_WORKSPACE}/ci-artifacts"
-          ls -lah ../ci-artifacts

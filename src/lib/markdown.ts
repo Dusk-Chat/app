@@ -104,13 +104,13 @@ export function renderMarkdown(text: string): string {
   // standalone image url gets rendered as a clickable image
   if (isStandaloneImageUrl(text)) {
     const url = escapeHtml(text.trim());
-    return `<img src="${url}" class="dusk-msg-image dusk-media-clickable" alt="image" loading="lazy" />`;
+    return `<img src="${url}" role="button" tabindex="0" class="dusk-msg-image dusk-media-clickable" alt="image" loading="lazy" />`;
   }
 
   // standalone video url gets rendered as an inline video player
   if (isStandaloneVideoUrl(text)) {
     const url = escapeHtml(text.trim());
-    return `<video src="${url}" class="dusk-msg-video dusk-media-clickable" preload="metadata" loop muted autoplay playsinline><track kind="captions" /></video>`;
+    return `<video src="${url}" role="button" tabindex="0" class="dusk-msg-video dusk-media-clickable" preload="metadata" loop muted autoplay playsinline><track kind="captions" /></video>`;
   }
 
   // split by inline code spans to avoid parsing markdown inside code

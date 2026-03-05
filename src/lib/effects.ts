@@ -10,6 +10,7 @@ export interface ProfileEffect {
   trigger: "click" | "hover" | "entrance";
   duration: number;
   layers: AnimationLayer[];
+  card_layers?: AnimationLayer[];
 }
 
 export interface AnimationLayer {
@@ -23,18 +24,54 @@ export interface AnimationLayer {
 
 export type LayerElement =
   | { type: "avatar" }
-  | { type: "shape"; shape: ShapeType; fill: string; stroke?: string; size: number }
-  | { type: "path"; d: string; stroke: string; strokeWidth: number; fill?: string }
+  | {
+      type: "shape";
+      shape: ShapeType;
+      fill: string;
+      stroke?: string;
+      size: number;
+    }
+  | {
+      type: "path";
+      d: string;
+      stroke: string;
+      strokeWidth: number;
+      fill?: string;
+    }
   | { type: "icon"; icon: string; color: string; size: number }
   | { type: "text"; content: string; font: string; color: string; size: number }
   | { type: "particle-preset"; preset: ParticlePresetName };
 
 export type ShapeType =
-  | "circle" | "ring" | "star" | "diamond" | "hexagon" | "triangle"
-  | "heart" | "lightning" | "crescent" | "cross" | "spiral" | "burst";
+  | "circle"
+  | "ring"
+  | "star"
+  | "diamond"
+  | "hexagon"
+  | "triangle"
+  | "heart"
+  | "lightning"
+  | "crescent"
+  | "cross"
+  | "spiral"
+  | "burst";
 
 export type ParticlePresetName =
-  | "embers" | "confetti" | "sparkle" | "snow" | "fireflies" | "smoke";
+  | "embers"
+  | "confetti"
+  | "sparkle"
+  | "snow"
+  | "fireflies"
+  | "smoke"
+  | "aurora"
+  | "petals"
+  | "stardust"
+  | "plasma"
+  | "electric"
+  | "glitter"
+  | "hearts"
+  | "vortex"
+  | "cosmos";
 
 export interface EffectKeyframe {
   offset: number;
@@ -56,7 +93,10 @@ export interface KeyframeProperties {
 }
 
 export type EasingCurve =
-  | "linear" | "ease-in" | "ease-out" | "ease-in-out"
+  | "linear"
+  | "ease-in"
+  | "ease-out"
+  | "ease-in-out"
   | { cubic: [number, number, number, number] };
 
 // === constants ===
@@ -67,23 +107,56 @@ export const MIN_DURATION = 100;
 export const MAX_EFFECT_SIZE = 10240; // 10kb
 
 export const VALID_SHAPES: ShapeType[] = [
-  "circle", "ring", "star", "diamond", "hexagon", "triangle",
-  "heart", "lightning", "crescent", "cross", "spiral", "burst",
+  "circle",
+  "ring",
+  "star",
+  "diamond",
+  "hexagon",
+  "triangle",
+  "heart",
+  "lightning",
+  "crescent",
+  "cross",
+  "spiral",
+  "burst",
 ];
 
 export const VALID_PARTICLE_PRESETS: ParticlePresetName[] = [
-  "embers", "confetti", "sparkle", "snow", "fireflies", "smoke",
+  "embers",
+  "confetti",
+  "sparkle",
+  "snow",
+  "fireflies",
+  "smoke",
+  "aurora",
+  "petals",
+  "stardust",
+  "plasma",
+  "electric",
+  "glitter",
+  "hearts",
+  "vortex",
+  "cosmos",
 ];
 
 export const ANIMATABLE_PROPERTIES: (keyof KeyframeProperties)[] = [
-  "x", "y", "scale", "rotation", "opacity", "blur",
-  "color", "glowColor", "glowSize", "pathOffset",
+  "x",
+  "y",
+  "scale",
+  "rotation",
+  "opacity",
+  "blur",
+  "color",
+  "glowColor",
+  "glowSize",
+  "pathOffset",
 ];
 
 // === validation ===
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
-const RGBA_COLOR_RE = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+))?\s*\)$/;
+const RGBA_COLOR_RE =
+  /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+))?\s*\)$/;
 // only valid svg path commands and their numeric arguments
 const SVG_PATH_RE = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/;
 
@@ -123,13 +196,19 @@ export function validateEffect(raw: unknown): ProfileEffect | null {
   if (typeof effect.author_peer_id !== "string") return null;
 
   const trigger = effect.trigger;
-  if (trigger !== "click" && trigger !== "hover" && trigger !== "entrance") return null;
+  if (trigger !== "click" && trigger !== "hover" && trigger !== "entrance")
+    return null;
 
   const duration = Number(effect.duration);
   if (!Number.isFinite(duration)) return null;
 
   const layers = effect.layers;
-  if (!Array.isArray(layers) || layers.length === 0 || layers.length > MAX_LAYERS) return null;
+  if (
+    !Array.isArray(layers) ||
+    layers.length === 0 ||
+    layers.length > MAX_LAYERS
+  )
+    return null;
 
   const validatedLayers: AnimationLayer[] = [];
   for (const layer of layers) {
@@ -254,7 +333,8 @@ function validateElement(raw: unknown): LayerElement | null {
 
     case "particle-preset": {
       const preset = String(el.preset);
-      if (!VALID_PARTICLE_PRESETS.includes(preset as ParticlePresetName)) return null;
+      if (!VALID_PARTICLE_PRESETS.includes(preset as ParticlePresetName))
+        return null;
       return { type: "particle-preset", preset: preset as ParticlePresetName };
     }
 
@@ -278,14 +358,21 @@ function validateKeyframe(raw: unknown): EffectKeyframe | null {
 
   if (p.x !== undefined) validated.x = clamp(toNumber(p.x, 0), -500, 500);
   if (p.y !== undefined) validated.y = clamp(toNumber(p.y, 0), -500, 500);
-  if (p.scale !== undefined) validated.scale = clamp(toNumber(p.scale, 1), 0, 5);
-  if (p.rotation !== undefined) validated.rotation = clamp(toNumber(p.rotation, 0), -3600, 3600);
-  if (p.opacity !== undefined) validated.opacity = clamp(toNumber(p.opacity, 1), 0, 1);
+  if (p.scale !== undefined)
+    validated.scale = clamp(toNumber(p.scale, 1), 0, 5);
+  if (p.rotation !== undefined)
+    validated.rotation = clamp(toNumber(p.rotation, 0), -3600, 3600);
+  if (p.opacity !== undefined)
+    validated.opacity = clamp(toNumber(p.opacity, 1), 0, 1);
   if (p.blur !== undefined) validated.blur = clamp(toNumber(p.blur, 0), 0, 50);
-  if (p.color !== undefined && isValidColor(String(p.color))) validated.color = String(p.color);
-  if (p.glowColor !== undefined && isValidColor(String(p.glowColor))) validated.glowColor = String(p.glowColor);
-  if (p.glowSize !== undefined) validated.glowSize = clamp(toNumber(p.glowSize, 0), 0, 100);
-  if (p.pathOffset !== undefined) validated.pathOffset = clamp(toNumber(p.pathOffset, 0), 0, 1);
+  if (p.color !== undefined && isValidColor(String(p.color)))
+    validated.color = String(p.color);
+  if (p.glowColor !== undefined && isValidColor(String(p.glowColor)))
+    validated.glowColor = String(p.glowColor);
+  if (p.glowSize !== undefined)
+    validated.glowSize = clamp(toNumber(p.glowSize, 0), 0, 100);
+  if (p.pathOffset !== undefined)
+    validated.pathOffset = clamp(toNumber(p.pathOffset, 0), 0, 1);
 
   const easing = validateEasing(kf.easing);
   const result: EffectKeyframe = { offset, properties: validated };
@@ -318,10 +405,14 @@ function validateEasing(raw: unknown): EasingCurve | undefined {
 export function easingToCss(easing: EasingCurve): string {
   if (typeof easing === "string") {
     switch (easing) {
-      case "linear": return "linear";
-      case "ease-in": return "cubic-bezier(0.4, 0, 1, 1)";
-      case "ease-out": return "cubic-bezier(0, 0, 0.2, 1)";
-      case "ease-in-out": return "cubic-bezier(0.4, 0, 0.2, 1)";
+      case "linear":
+        return "linear";
+      case "ease-in":
+        return "cubic-bezier(0.4, 0, 1, 1)";
+      case "ease-out":
+        return "cubic-bezier(0, 0, 0.2, 1)";
+      case "ease-in-out":
+        return "cubic-bezier(0.4, 0, 0.2, 1)";
     }
   }
   const [x1, y1, x2, y2] = easing.cubic;
@@ -329,7 +420,29 @@ export function easingToCss(easing: EasingCurve): string {
 }
 
 // convert a layer's keyframes to web animations api format
-export function layerToWebAnimationKeyframes(layer: AnimationLayer): Keyframe[] {
+export function layerToWebAnimationKeyframes(
+  layer: AnimationLayer,
+): Keyframe[] {
+  // First pass: find all property metrics used in this layer
+  let usesX = false,
+    usesY = false,
+    usesScale = false,
+    usesRotation = false,
+    usesOpacity = false,
+    usesBlur = false,
+    usesGlow = false;
+
+  for (const kf of layer.keyframes) {
+    const p = kf.properties;
+    if (p.x !== undefined) usesX = true;
+    if (p.y !== undefined) usesY = true;
+    if (p.scale !== undefined) usesScale = true;
+    if (p.rotation !== undefined) usesRotation = true;
+    if (p.opacity !== undefined) usesOpacity = true;
+    if (p.blur !== undefined && p.blur > 0) usesBlur = true;
+    if (p.glowSize !== undefined && p.glowSize > 0) usesGlow = true;
+  }
+
   return layer.keyframes
     .sort((a, b) => a.offset - b.offset)
     .map((kf) => {
@@ -338,35 +451,38 @@ export function layerToWebAnimationKeyframes(layer: AnimationLayer): Keyframe[] 
 
       // build transform string
       const transforms: string[] = [];
-      if (p.x !== undefined || p.y !== undefined) {
+      if (usesX || usesY) {
         transforms.push(`translate(${p.x ?? 0}px, ${p.y ?? 0}px)`);
       }
-      if (p.scale !== undefined) {
-        transforms.push(`scale(${p.scale})`);
+      if (usesScale) {
+        transforms.push(`scale(${p.scale ?? 1})`);
       }
-      if (p.rotation !== undefined) {
-        transforms.push(`rotate(${p.rotation}deg)`);
+      if (usesRotation) {
+        transforms.push(`rotate(${p.rotation ?? 0}deg)`);
       }
       if (transforms.length > 0) {
         frame.transform = transforms.join(" ");
       }
 
-      if (p.opacity !== undefined) frame.opacity = p.opacity;
+      if (usesOpacity) {
+        frame.opacity = p.opacity ?? 1;
+      }
 
       // build filter string
       const filters: string[] = [];
-      if (p.blur !== undefined && p.blur > 0) {
-        filters.push(`blur(${p.blur}px)`);
-      }
-      if (filters.length > 0) {
-        frame.filter = filters.join(" ");
+      if (usesBlur) {
+        filters.push(`blur(${p.blur ?? 0}px)`);
       }
 
-      // glow via box-shadow
-      if (p.glowColor !== undefined || p.glowSize !== undefined) {
-        const color = p.glowColor ?? "#ff4f00";
+      // glow via drop-shadow
+      if (usesGlow) {
+        const color = p.glowColor ?? "transparent";
         const size = p.glowSize ?? 0;
-        frame.boxShadow = `0 0 ${size}px ${size / 2}px ${color}`;
+        filters.push(`drop-shadow(0 0 ${size}px ${color})`);
+      }
+
+      if (filters.length > 0) {
+        frame.filter = filters.join(" ");
       }
 
       // per-keyframe easing

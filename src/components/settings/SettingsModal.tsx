@@ -6,6 +6,7 @@ import {
   Bell,
   Eye,
   Palette,
+  Sparkles,
   Info,
   Copy,
   Check,
@@ -30,12 +31,14 @@ import { updateProfile, setRelayDiscoverable } from "../../lib/tauri";
 import type { UserStatus } from "../../lib/types";
 import Avatar from "../common/Avatar";
 import Button from "../common/Button";
+import ProfileEffectsEditor from "./ProfileEffectsEditor";
 
 type SettingsSection =
   | "profile"
   | "notifications"
   | "privacy"
   | "appearance"
+  | "effects"
   | "about";
 
 interface SettingsModalProps {
@@ -79,6 +82,7 @@ const SettingsModal: Component<SettingsModalProps> = (props) => {
       { id: "notifications", label: "notifications", icon: Bell },
       { id: "privacy", label: "privacy", icon: Eye },
       { id: "appearance", label: "appearance", icon: Palette },
+      { id: "effects", label: "effects", icon: Sparkles },
       { id: "about", label: "about", icon: Info },
     ];
 
@@ -114,7 +118,7 @@ const SettingsModal: Component<SettingsModalProps> = (props) => {
     <Show when={props.isOpen}>
       <Portal>
         <div class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/90 animate-fade-in">
-          <div class="bg-gray-900 border-2 border-white/20 w-full max-w-[800px] h-[600px] mx-4 animate-scale-in flex overflow-hidden">
+          <div role="dialog" aria-modal="true" class="bg-gray-900 border-2 border-white/20 w-full max-w-[900px] h-[600px] mx-4 animate-scale-in flex overflow-hidden">
             {/* sidebar navigation */}
             <div class="w-[200px] shrink-0 bg-black border-r border-white/10 flex flex-col">
               <div class="p-4 border-b border-white/10">
@@ -145,7 +149,7 @@ const SettingsModal: Component<SettingsModalProps> = (props) => {
             </div>
 
             {/* main content */}
-            <div class="flex-1 flex flex-col">
+            <div class="flex-1 flex flex-col min-w-0">
               {/* header */}
               <div class="flex items-center justify-between p-4 border-b border-white/10">
                 <h3 class="text-[20px] font-bold text-white capitalize">
@@ -161,7 +165,10 @@ const SettingsModal: Component<SettingsModalProps> = (props) => {
               </div>
 
               {/* content */}
-              <div class="flex-1 overflow-y-auto p-6">
+              <div
+                class="flex-1 overflow-y-auto min-w-0 flex flex-col"
+                classList={{ "p-6": activeSection() !== "effects" }}
+              >
                 <Show when={activeSection() === "profile"}>
                   <ProfileSection
                     displayName={localDisplayName()}
@@ -186,6 +193,10 @@ const SettingsModal: Component<SettingsModalProps> = (props) => {
 
                 <Show when={activeSection() === "appearance"}>
                   <AppearanceSection />
+                </Show>
+
+                <Show when={activeSection() === "effects"}>
+                  <ProfileEffectsEditor />
                 </Show>
 
                 <Show when={activeSection() === "about"}>

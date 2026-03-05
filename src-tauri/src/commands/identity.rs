@@ -85,8 +85,7 @@ pub async fn create_identity(
         if !result.is_human {
             Err("verification failed".to_string())
         } else {
-            let mut new_identity =
-                DuskIdentity::generate(&display_name, &bio.unwrap_or_default());
+            let mut new_identity = DuskIdentity::generate(&display_name, &bio.unwrap_or_default());
 
             // generate a cryptographic proof binding the verification to this keypair
             let proof = verification::generate_proof(
@@ -310,10 +309,7 @@ pub async fn search_directory(
                     }
 
                     // re-run local search to get merged results
-                    let entries2 = state
-                        .storage
-                        .load_directory()
-                        .unwrap_or_default();
+                    let entries2 = state.storage.load_directory().unwrap_or_default();
                     let mut results2: Vec<DirectoryEntry> = entries2
                         .into_values()
                         .filter(|entry| {
@@ -356,19 +352,48 @@ pub async fn get_friends(state: State<'_, AppState>) -> Result<Vec<DirectoryEntr
 #[tauri::command]
 pub async fn add_friend(state: State<'_, AppState>, peer_id: String) -> Result<(), String> {
     ipc_log!("add_friend", {
-        state
+        let res = state
             .storage
             .set_friend_status(&peer_id, true)
-            .map_err(|e| format!("failed to add friend: {}", e))
+            .map_err(|e| format!("failed to add friend: {}", e));
+
+        // explicitly try to discover new friend over rendezvous
+        if res.is_ok() {
+            let node_handle = state.node_handle.lock().await;
+            if let Some(ref handle) = *node_handle {
+                let _ = handle
+                    .command_tx
+                    .send(crate::node::NodeCommand::DiscoverRendezvous {
+                        namespace: format!("dusk/peer/{}", peer_id),
+                    })
+                    .await;
+            }
+        }
+
+        res
     })
 }
 
 #[tauri::command]
 pub async fn remove_friend(state: State<'_, AppState>, peer_id: String) -> Result<(), String> {
-    state
+    let res = state
         .storage
         .set_friend_status(&peer_id, false)
-        .map_err(|e| format!("failed to remove friend: {}", e))
+        .map_err(|e| format!("failed to remove friend: {}", e));
+
+    if res.is_ok() {
+        let node_handle = state.node_handle.lock().await;
+        if let Some(ref handle) = *node_handle {
+            let _ = handle
+                .command_tx
+                .send(crate::node::NodeCommand::UnregisterRendezvous {
+                    namespace: format!("dusk/peer/{}", peer_id),
+                })
+                .await;
+        }
+    }
+
+    res
 }
 
 // discover online peers via the global relay tracker namespace

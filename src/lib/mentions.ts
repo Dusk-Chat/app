@@ -75,6 +75,6 @@ export function renderMentions(escapedHtml: string): string {
       return `<span class="dusk-mention dusk-mention-everyone">@${name}</span>`;
     }
 
-    return `<span class="dusk-mention" data-peer-id="${id}">@${name}</span>`;
+    return `<span role="button" tabindex="0" aria-label="Mention" class="dusk-mention" data-peer-id="${id}">@${name}</span>`;
   });
 }
