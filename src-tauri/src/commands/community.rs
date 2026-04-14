@@ -182,10 +182,10 @@ pub async fn join_community(
     ipc_log!("join_community", {
         let invite = crate::protocol::community::InviteCode::decode(&invite_code)?;
 
-        let local_peer_id = {
+        let (local_peer_id, local_display_name) = {
             let identity = state.identity.lock().await;
             let id = identity.as_ref().ok_or("no identity loaded")?;
-            id.peer_id.to_string()
+            (id.peer_id.to_string(), id.display_name.clone())
         };
 
         // create a placeholder document that will be backfilled via crdt sync
@@ -199,6 +199,14 @@ pub async fn join_community(
                 "",
             )?;
         }
+
+        // add ourselves as a member so other peers see us after crdt merge
+        engine.add_member(
+            &invite.community_id,
+            &local_peer_id,
+            &local_display_name,
+            &["member"],
+        )?;
 
         // joining via invite must never keep elevated local roles from stale local docs
         if had_existing_doc {

@@ -81,6 +81,26 @@ impl CrdtEngine {
         Ok(())
     }
 
+    // add a peer as a member of the community
+    pub fn add_member(
+        &mut self,
+        community_id: &str,
+        peer_id: &str,
+        display_name: &str,
+        roles: &[&str],
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::add_member(doc, peer_id, display_name, roles)
+            .map_err(|e| format!("failed to add member: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
     // add a channel to an existing community
     pub fn create_channel(
         &mut self,

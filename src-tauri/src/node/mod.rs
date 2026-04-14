@@ -686,15 +686,25 @@ pub async fn start(
 
                                             match merge_result {
                                                 Ok(()) => {
-                                                    if let Some(doc_bytes) = corrected_doc_bytes {
-                                                        let corrected_snapshot = crate::crdt::sync::DocumentSnapshot {
-                                                            community_id: community_id.clone(),
-                                                            doc_bytes,
+                                                    // broadcast our merged doc back so the other side
+                                                    // converges (e.g. they learn about our member entry)
+                                                    {
+                                                        let mut engine = crdt_engine.lock().await;
+                                                        let broadcast_bytes = if let Some(bytes) = corrected_doc_bytes {
+                                                            Some(bytes)
+                                                        } else {
+                                                            engine.get_doc_bytes(&community_id)
                                                         };
-                                                        let corrected_offer = crate::crdt::sync::SyncMessage::DocumentOffer(corrected_snapshot);
-                                                        if let Ok(data) = serde_json::to_vec(&corrected_offer) {
-                                                            let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
-                                                            let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                                                        if let Some(doc_bytes) = broadcast_bytes {
+                                                            let reply_snapshot = crate::crdt::sync::DocumentSnapshot {
+                                                                community_id: community_id.clone(),
+                                                                doc_bytes,
+                                                            };
+                                                            let reply_offer = crate::crdt::sync::SyncMessage::DocumentOffer(reply_snapshot);
+                                                            if let Ok(data) = serde_json::to_vec(&reply_offer) {
+                                                                let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
+                                                                let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                                                            }
                                                         }
                                                     }
 
@@ -1513,7 +1523,9 @@ pub async fn start(
                         // ignore inbound requests and other events for turn credentials
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::TurnCredentials(_)) => {}
 
-                        _ => {}
+                        other => {
+                            log::info!("unhandled swarm event: {:?}", other);
+                        }
                     }
                 }
 

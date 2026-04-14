@@ -77,6 +77,39 @@ pub fn init_placeholder_community_doc(
     Ok(())
 }
 
+// add a peer as a member of the community with the given role
+pub fn add_member(
+    doc: &mut AutoCommit,
+    peer_id: &str,
+    display_name: &str,
+    roles: &[&str],
+) -> Result<(), automerge::AutomergeError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let members = doc
+        .get(ROOT, "members")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| automerge::AutomergeError::InvalidObjId("members not found".to_string()))?;
+
+    // skip if already a member
+    if doc.get(&members, peer_id)?.is_some() {
+        return Ok(());
+    }
+
+    let member = doc.put_object(&members, peer_id, ObjType::Map)?;
+    doc.put(&member, "display_name", display_name)?;
+    doc.put(&member, "joined_at", now as i64)?;
+    let role_list = doc.put_object(&member, "roles", ObjType::List)?;
+    for (i, role) in roles.iter().enumerate() {
+        doc.insert(&role_list, i, *role)?;
+    }
+
+    Ok(())
+}
+
 // add a new channel to the community document
 pub fn add_channel(
     doc: &mut AutoCommit,
