@@ -11,6 +11,7 @@ pub enum DirectoryRequest {
         display_name: String,
         // full relay circuit multiaddr so other peers can connect
         // e.g. /dns4/relay.duskchat.app/tcp/4001/p2p/<relay_id>/p2p-circuit/p2p/<peer_id>
+        #[serde(default)]
         relay_addr: String,
     },
     Search { query: String },
@@ -30,5 +31,6 @@ pub struct DirectoryProfileEntry {
     pub display_name: String,
     pub last_seen: u64,
     // relay circuit address for connecting to this peer, empty if unknown
+    #[serde(default)]
     pub relay_addr: String,
 }
