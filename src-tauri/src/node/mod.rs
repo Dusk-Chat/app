@@ -377,6 +377,12 @@ fn register_directory(
 ) {
     let profile = storage.load_profile().unwrap_or_default();
     let circuit_addr = build_circuit_addr(relay_multiaddr, local_peer_id);
+    log::info!(
+        "directory: sending Register to relay {} (name='{}', circuit='{}')",
+        relay_peer,
+        profile.display_name,
+        circuit_addr,
+    );
     swarm.behaviour_mut().directory_service.send_request(
         relay_peer,
         crate::protocol::directory::DirectoryRequest::Register {
@@ -531,6 +537,7 @@ pub async fn start(
             .load_settings()
             .map(|s| s.relay_discoverable)
             .unwrap_or(true);
+        log::info!("directory: relay_discoverable={}, relay_multiaddr={:?}", relay_discoverable, relay_multiaddr);
         // relay reconnection state with exponential backoff
         let mut relay_backoff_secs = RELAY_INITIAL_BACKOFF_SECS;
         // deferred warning timer -- only notify the frontend after the grace
@@ -1134,7 +1141,11 @@ pub async fn start(
                                     let local_id = *swarm_instance.local_peer_id();
                                     register_directory(&mut swarm_instance, &relay_peer_id, &storage, addr, local_id);
                                     log::info!("directory: sent Register to relay");
+                                } else {
+                                    log::warn!("directory: skipped Register -- relay_multiaddr is None");
                                 }
+                            } else {
+                                log::info!("directory: skipped Register -- relay_discoverable is false");
                             }
                         }
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::RelayClient(event)) => {
