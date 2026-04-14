@@ -207,6 +207,10 @@ pub enum NodeCommand {
             Result<Vec<crate::protocol::directory::DirectoryProfileEntry>, String>,
         >,
     },
+    // dial a peer using a known multiaddr (e.g. relay circuit address from directory)
+    DialPeer {
+        addr: String,
+    },
     // update the relay_discoverable flag at runtime (from settings toggle)
     SetRelayDiscoverable {
         enabled: bool,
@@ -350,6 +354,36 @@ fn publish_profile(
             let _ = swarm.behaviour_mut().gossipsub.publish(topic, data);
         }
     }
+}
+
+// build the full relay circuit multiaddr string for this peer
+// e.g. /dns4/relay.duskchat.app/tcp/4001/p2p/<relay_id>/p2p-circuit/p2p/<local_id>
+fn build_circuit_addr(relay_multiaddr: &libp2p::Multiaddr, local_peer_id: libp2p::PeerId) -> String {
+    relay_multiaddr
+        .clone()
+        .with(libp2p::multiaddr::Protocol::P2pCircuit)
+        .with(libp2p::multiaddr::Protocol::P2p(local_peer_id))
+        .to_string()
+}
+
+// send a directory registration to the relay so other peers can discover
+// and connect to us via the circuit address
+fn register_directory(
+    swarm: &mut libp2p::Swarm<behaviour::DuskBehaviour>,
+    relay_peer: &libp2p::PeerId,
+    storage: &crate::storage::DiskStorage,
+    relay_multiaddr: &libp2p::Multiaddr,
+    local_peer_id: libp2p::PeerId,
+) {
+    let profile = storage.load_profile().unwrap_or_default();
+    let circuit_addr = build_circuit_addr(relay_multiaddr, local_peer_id);
+    swarm.behaviour_mut().directory_service.send_request(
+        relay_peer,
+        crate::protocol::directory::DirectoryRequest::Register {
+            display_name: profile.display_name,
+            relay_addr: circuit_addr,
+        },
+    );
 }
 
 // start the p2p node on a background task
@@ -1096,14 +1130,11 @@ pub async fn start(
 
                             // register profile in relay's persistent directory if discoverable
                             if relay_discoverable {
-                                let profile = storage.load_profile().unwrap_or_default();
-                                swarm_instance.behaviour_mut().directory_service.send_request(
-                                    &relay_peer_id,
-                                    crate::protocol::directory::DirectoryRequest::Register {
-                                        display_name: profile.display_name,
-                                    },
-                                );
-                                log::info!("directory: sent Register to relay");
+                                if let Some(ref addr) = relay_multiaddr {
+                                    let local_id = *swarm_instance.local_peer_id();
+                                    register_directory(&mut swarm_instance, &relay_peer_id, &storage, addr, local_id);
+                                    log::info!("directory: sent Register to relay");
+                                }
                             }
                         }
                         libp2p::swarm::SwarmEvent::Behaviour(behaviour::DuskBehaviourEvent::RelayClient(event)) => {
@@ -1531,6 +1562,16 @@ pub async fn start(
                                     }
                                 }
                             }
+
+                            // refresh directory registration so our connection string stays valid
+                            // and last_seen stays current on the relay
+                            if relay_discoverable {
+                                if let Some(ref addr) = relay_multiaddr {
+                                    let local_id = *swarm_instance.local_peer_id();
+                                    register_directory(&mut swarm_instance, &rp, &storage, addr, local_id);
+                                    log::debug!("directory: refreshed registration on tick");
+                                }
+                            }
                         }
                     }
 
@@ -1774,14 +1815,9 @@ pub async fn start(
                         }
                         Some(NodeCommand::DirectoryRegister) => {
                             if relay_reservation_active {
-                                if let Some(rp) = relay_peer {
-                                    let profile = storage.load_profile().unwrap_or_default();
-                                    swarm_instance.behaviour_mut().directory_service.send_request(
-                                        &rp,
-                                        crate::protocol::directory::DirectoryRequest::Register {
-                                            display_name: profile.display_name,
-                                        },
-                                    );
+                                if let (Some(rp), Some(ref addr)) = (relay_peer, &relay_multiaddr) {
+                                    let local_id = *swarm_instance.local_peer_id();
+                                    register_directory(&mut swarm_instance, &rp, &storage, addr, local_id);
                                     log::info!("directory: sent Register (command)");
                                 }
                             }
@@ -1811,18 +1847,26 @@ pub async fn start(
                                 let _ = reply.send(Err("relay not connected".to_string()));
                             }
                         }
+                        Some(NodeCommand::DialPeer { addr }) => {
+                            match addr.parse::<libp2p::Multiaddr>() {
+                                Ok(multiaddr) => {
+                                    log::info!("dialing peer via directory address: {}", addr);
+                                    if let Err(e) = swarm_instance.dial(multiaddr) {
+                                        log::warn!("failed to dial directory peer {}: {}", addr, e);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("invalid multiaddr from directory: {} ({})", addr, e);
+                                }
+                            }
+                        }
                         Some(NodeCommand::SetRelayDiscoverable { enabled }) => {
                             relay_discoverable = enabled;
                             if relay_reservation_active {
                                 if enabled {
-                                    if let Some(rp) = relay_peer {
-                                        let profile = storage.load_profile().unwrap_or_default();
-                                        swarm_instance.behaviour_mut().directory_service.send_request(
-                                            &rp,
-                                            crate::protocol::directory::DirectoryRequest::Register {
-                                                display_name: profile.display_name,
-                                            },
-                                        );
+                                    if let (Some(rp), Some(ref addr)) = (relay_peer, &relay_multiaddr) {
+                                        let local_id = *swarm_instance.local_peer_id();
+                                        register_directory(&mut swarm_instance, &rp, &storage, addr, local_id);
                                         log::info!("directory: registered after opt-in");
                                     }
                                 } else {

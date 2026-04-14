@@ -7,7 +7,12 @@ pub const DIRECTORY_PROTOCOL: StreamProtocol = StreamProtocol::new("/dusk/direct
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum DirectoryRequest {
-    Register { display_name: String },
+    Register {
+        display_name: String,
+        // full relay circuit multiaddr so other peers can connect
+        // e.g. /dns4/relay.duskchat.app/tcp/4001/p2p/<relay_id>/p2p-circuit/p2p/<peer_id>
+        relay_addr: String,
+    },
     Search { query: String },
     Remove,
 }
@@ -24,4 +29,6 @@ pub struct DirectoryProfileEntry {
     pub peer_id: String,
     pub display_name: String,
     pub last_seen: u64,
+    // relay circuit address for connecting to this peer, empty if unknown
+    pub relay_addr: String,
 }

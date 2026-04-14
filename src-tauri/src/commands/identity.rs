@@ -294,6 +294,9 @@ pub async fn search_directory(
                         .unwrap()
                         .as_millis() as u64;
 
+                    // collect relay addrs so we can dial discovered peers
+                    let mut dial_addrs: Vec<String> = Vec::new();
+
                     for entry in relay_entries {
                         // upsert as stub — empty bio/public_key means never directly connected
                         let stub = DirectoryEntry {
@@ -306,6 +309,24 @@ pub async fn search_directory(
                         };
                         // preserve existing local data if we already know this peer
                         let _ = state.storage.save_directory_entry_if_new(&stub);
+
+                        // queue a dial if the peer advertised a relay circuit address
+                        if !entry.relay_addr.is_empty() {
+                            dial_addrs.push(entry.relay_addr);
+                        }
+                    }
+
+                    // tell the node to connect to discovered peers via their circuit address
+                    if !dial_addrs.is_empty() {
+                        let node_handle = state.node_handle.lock().await;
+                        if let Some(ref handle) = *node_handle {
+                            for addr in dial_addrs {
+                                let _ = handle
+                                    .command_tx
+                                    .send(crate::node::NodeCommand::DialPeer { addr })
+                                    .await;
+                            }
+                        }
                     }
 
                     // re-run local search to get merged results
