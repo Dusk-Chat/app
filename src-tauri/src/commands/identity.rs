@@ -11,6 +11,7 @@ use crate::storage::UserSettings;
 use crate::verification::{self, ChallengeSubmission};
 use crate::AppState;
 
+use super::community::broadcast_sync;
 use super::ipc_log;
 
 // build a signed profile announcement and publish it on the directory topic
@@ -122,13 +123,24 @@ pub async fn create_identity(
 #[tauri::command]
 pub async fn update_display_name(state: State<'_, AppState>, name: String) -> Result<(), String> {
     ipc_log!("update_display_name", {
-        let mut identity = state.identity.lock().await;
-        let id = identity.as_mut().ok_or("no identity loaded")?;
+        let peer_id_str;
+        {
+            let mut identity = state.identity.lock().await;
+            let id = identity.as_mut().ok_or("no identity loaded")?;
+            id.display_name = name.clone();
+            id.save(&state.storage)?;
+            peer_id_str = id.peer_id.to_string();
+            announce_profile(id, &state).await;
+        }
 
-        id.display_name = name;
-        id.save(&state.storage)?;
-
-        announce_profile(id, &state).await;
+        // propagate the name change into every community crdt
+        let updated_communities = {
+            let mut engine = state.crdt_engine.lock().await;
+            engine.update_member_display_name_everywhere(&peer_id_str, &name)
+        };
+        for cid in updated_communities {
+            broadcast_sync(&state, &cid).await;
+        }
 
         Ok(())
     })
@@ -141,17 +153,27 @@ pub async fn update_profile(
     bio: String,
 ) -> Result<PublicIdentity, String> {
     ipc_log!("update_profile", {
-        let mut identity = state.identity.lock().await;
-        let id = identity.as_mut().ok_or("no identity loaded")?;
+        let peer_id_str;
+        let public;
+        {
+            let mut identity = state.identity.lock().await;
+            let id = identity.as_mut().ok_or("no identity loaded")?;
+            id.display_name = display_name.clone();
+            id.bio = bio;
+            id.save(&state.storage)?;
+            peer_id_str = id.peer_id.to_string();
+            public = id.public_identity();
+            announce_profile(id, &state).await;
+        }
 
-        id.display_name = display_name;
-        id.bio = bio;
-        id.save(&state.storage)?;
-
-        let public = id.public_identity();
-
-        // re-announce so connected peers see the change immediately
-        announce_profile(id, &state).await;
+        // propagate the name change into every community crdt
+        let updated_communities = {
+            let mut engine = state.crdt_engine.lock().await;
+            engine.update_member_display_name_everywhere(&peer_id_str, &display_name)
+        };
+        for cid in updated_communities {
+            broadcast_sync(&state, &cid).await;
+        }
 
         Ok(public)
     })
@@ -193,12 +215,26 @@ pub async fn save_settings(
         }
 
         // re-announce if the display name was updated through settings
+        let peer_id_str = identity.as_ref().map(|id| id.peer_id.to_string());
         if name_changed {
             if let Some(id) = identity.as_ref() {
                 announce_profile(id, &state).await;
             }
         }
         drop(identity);
+
+        // propagate the name change into every community crdt
+        if name_changed {
+            if let Some(ref pid) = peer_id_str {
+                let updated_communities = {
+                    let mut engine = state.crdt_engine.lock().await;
+                    engine.update_member_display_name_everywhere(pid, &settings.display_name)
+                };
+                for cid in updated_communities {
+                    broadcast_sync(&state, &cid).await;
+                }
+            }
+        }
 
         // broadcast presence if status changed
         if status_changed {

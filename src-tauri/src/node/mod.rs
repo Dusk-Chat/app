@@ -846,6 +846,15 @@ pub async fn start(
                                         };
                                         let _ = storage.save_directory_entry(&entry);
 
+                                        // update the member's display name in all community crdts
+                                        {
+                                            let mut engine = crdt_engine.lock().await;
+                                            engine.update_member_display_name_everywhere(
+                                                &profile.peer_id,
+                                                &profile.display_name,
+                                            );
+                                        }
+
                                         let _ = app_handle.emit("dusk-event", DuskEvent::ProfileReceived {
                                             peer_id: profile.peer_id,
                                             display_name: profile.display_name,

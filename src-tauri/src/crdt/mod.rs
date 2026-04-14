@@ -101,6 +101,39 @@ impl CrdtEngine {
         Ok(())
     }
 
+    // update a member's display name in a single community crdt
+    pub fn update_member_display_name(
+        &mut self,
+        community_id: &str,
+        peer_id: &str,
+        display_name: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::update_member_display_name(doc, peer_id, display_name)?;
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // update a member's display name across all communities they belong to
+    pub fn update_member_display_name_everywhere(
+        &mut self,
+        peer_id: &str,
+        display_name: &str,
+    ) -> Vec<String> {
+        let community_ids: Vec<String> = self.documents.keys().cloned().collect();
+        let mut updated = Vec::new();
+        for cid in community_ids {
+            if self.update_member_display_name(&cid, peer_id, display_name).is_ok() {
+                updated.push(cid);
+            }
+        }
+        updated
+    }
+
     // add a channel to an existing community
     pub fn create_channel(
         &mut self,

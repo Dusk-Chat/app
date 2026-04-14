@@ -35,7 +35,7 @@ fn check_permission(
 }
 
 // helper to broadcast a crdt change to peers via the sync topic
-async fn broadcast_sync(state: &State<'_, AppState>, community_id: &str) {
+pub(super) async fn broadcast_sync(state: &State<'_, AppState>, community_id: &str) {
     let doc_bytes = {
         let mut engine = state.crdt_engine.lock().await;
         engine.get_doc_bytes(community_id)
@@ -667,7 +667,7 @@ pub async fn kick_member(
     engine.remove_member(&community_id, &member_peer_id)?;
     drop(engine);
 
-    // broadcast the kick to peers
+    // broadcast the kick to peers via gossip and crdt sync
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
         let presence_topic = gossip::topic_for_presence(&community_id);
@@ -684,6 +684,9 @@ pub async fn kick_member(
                 .await;
         }
     }
+    drop(node_handle);
+
+    broadcast_sync(&state, &community_id).await;
 
     Ok(())
 }

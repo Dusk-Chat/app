@@ -110,6 +110,31 @@ pub fn add_member(
     Ok(())
 }
 
+// update a member's display name in the crdt
+pub fn update_member_display_name(
+    doc: &mut AutoCommit,
+    peer_id: &str,
+    display_name: &str,
+) -> Result<(), String> {
+    let members = doc
+        .get(ROOT, "members")
+        .map_err(|e| e.to_string())?
+        .map(|(_, id)| id)
+        .ok_or("members not found")?;
+
+    let member = doc
+        .get(&members, peer_id)
+        .map_err(|e| e.to_string())?
+        .map(|(_, id)| id);
+
+    if let Some(member_id) = member {
+        doc.put(&member_id, "display_name", display_name)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 // add a new channel to the community document
 pub fn add_channel(
     doc: &mut AutoCommit,
