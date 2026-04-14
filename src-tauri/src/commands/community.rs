@@ -119,10 +119,11 @@ pub async fn create_community(
         let community_id = format!("com_{}", &hex::encode(hash)[..16]);
 
         let peer_id_str = id.peer_id.to_string();
+        let display_name = id.display_name.clone();
         drop(identity);
 
         let mut engine = state.crdt_engine.lock().await;
-        engine.create_community(&community_id, &name, &description, &peer_id_str)?;
+        engine.create_community(&community_id, &name, &description, &peer_id_str, &display_name)?;
 
         let meta = engine.get_community_meta(&community_id)?;
 
@@ -509,6 +510,19 @@ pub async fn get_members(
     let engine = state.crdt_engine.lock().await;
     let mut members = engine.get_members(&community_id)?;
     drop(engine);
+
+    // overlay display names from the peer directory so remote members show
+    // their latest known name even before a ProfileAnnounce arrives this session
+    let directory = state.storage.load_directory().unwrap_or_default();
+    for member in &mut members {
+        if member.display_name.is_empty() {
+            if let Some(entry) = directory.get(&member.peer_id) {
+                if !entry.display_name.is_empty() {
+                    member.display_name = entry.display_name.clone();
+                }
+            }
+        }
+    }
 
     // overlay the local user's identity so their display name stays current
     let identity = state.identity.lock().await;

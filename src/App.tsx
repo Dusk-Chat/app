@@ -67,6 +67,7 @@ import {
   setPeerOffline,
   setPeerStatus,
   removeMember,
+  updateMemberDisplayName,
 } from "./stores/members";
 import {
   setPeerCount,
@@ -464,7 +465,11 @@ const App: Component = () => {
           event.payload.bio,
           event.payload.public_key,
         );
-        // keep dm conversation names in sync
+        // keep member list and dm conversation names in sync
+        updateMemberDisplayName(
+          event.payload.peer_id,
+          event.payload.display_name,
+        );
         updateDMPeerDisplayName(
           event.payload.peer_id,
           event.payload.display_name,

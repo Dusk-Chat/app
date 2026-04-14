@@ -54,9 +54,10 @@ impl CrdtEngine {
         name: &str,
         description: &str,
         created_by: &str,
+        creator_display_name: &str,
     ) -> Result<(), String> {
         let mut doc = AutoCommit::new();
-        document::init_community_doc(&mut doc, name, description, created_by)
+        document::init_community_doc(&mut doc, name, description, created_by, creator_display_name)
             .map_err(|e| format!("failed to init community doc: {}", e))?;
 
         self.documents.insert(community_id.to_string(), doc);

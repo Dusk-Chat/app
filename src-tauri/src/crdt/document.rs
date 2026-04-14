@@ -10,6 +10,7 @@ pub fn init_community_doc(
     name: &str,
     description: &str,
     created_by: &str,
+    creator_display_name: &str,
 ) -> Result<(), automerge::AutomergeError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -42,7 +43,7 @@ pub fn init_community_doc(
 
     // add the creator as the first member with owner role
     let member = doc.put_object(&members, created_by, ObjType::Map)?;
-    doc.put(&member, "display_name", "")?;
+    doc.put(&member, "display_name", creator_display_name)?;
     doc.put(&member, "joined_at", now as i64)?;
     let roles = doc.put_object(&member, "roles", ObjType::List)?;
     doc.insert(&roles, 0, "owner")?;

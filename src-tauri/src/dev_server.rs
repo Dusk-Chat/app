@@ -402,11 +402,12 @@ async fn create_community(
     let community_id = format!("com_{}", &hex::encode(hash)[..16]);
 
     let peer_id_str = id.peer_id.to_string();
+    let display_name = id.display_name.clone();
     drop(identity);
 
     let mut engine = state.crdt_engine.lock().await;
     engine
-        .create_community(&community_id, &body.name, &body.description, &peer_id_str)
+        .create_community(&community_id, &body.name, &body.description, &peer_id_str, &display_name)
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     let meta = engine

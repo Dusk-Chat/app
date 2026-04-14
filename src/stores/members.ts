@@ -111,4 +111,13 @@ export function updateMemberRole(peerId: string, roles: string[]) {
   );
 }
 
+// update a member's display name when we receive their profile announcement
+export function updateMemberDisplayName(peerId: string, displayName: string) {
+  setMembers((prev) =>
+    prev.map((m) =>
+      m.peer_id === peerId ? { ...m, display_name: displayName } : m,
+    ),
+  );
+}
+
 export { members, typingPeerIds, setMembers, onlinePeerIds };
