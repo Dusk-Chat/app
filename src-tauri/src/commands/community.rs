@@ -393,6 +393,16 @@ pub async fn create_channel(
     category_id: Option<String>,
 ) -> Result<ChannelMeta, String> {
     ipc_log!("create_channel", {
+        let identity = state.identity.lock().await;
+        let id = identity.as_ref().ok_or("no identity loaded")?;
+        let requester_id = id.peer_id.to_string();
+        drop(identity);
+
+        let engine = state.crdt_engine.lock().await;
+        let members = engine.get_members(&community_id)?;
+        check_permission(&members, &requester_id, &["owner", "admin"])?;
+        drop(engine);
+
         let mut hasher = Sha256::new();
         hasher.update(community_id.as_bytes());
         hasher.update(name.as_bytes());
@@ -465,6 +475,16 @@ pub async fn create_category(
     name: String,
 ) -> Result<CategoryMeta, String> {
     ipc_log!("create_category", {
+        let identity = state.identity.lock().await;
+        let id = identity.as_ref().ok_or("no identity loaded")?;
+        let requester_id = id.peer_id.to_string();
+        drop(identity);
+
+        let engine = state.crdt_engine.lock().await;
+        let members = engine.get_members(&community_id)?;
+        check_permission(&members, &requester_id, &["owner", "admin"])?;
+        drop(engine);
+
         let mut hasher = Sha256::new();
         hasher.update(community_id.as_bytes());
         hasher.update(name.as_bytes());
@@ -686,6 +706,16 @@ pub async fn reorder_channels(
     community_id: String,
     channel_ids: Vec<String>,
 ) -> Result<Vec<ChannelMeta>, String> {
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
     let mut engine = state.crdt_engine.lock().await;
     let channels = engine.reorder_channels(&community_id, &channel_ids)?;
     drop(engine);

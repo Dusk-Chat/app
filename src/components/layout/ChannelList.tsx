@@ -44,6 +44,7 @@ import {
   voiceConnectionState,
 } from "../../stores/voice";
 import { identity } from "../../stores/identity";
+import { members } from "../../stores/members";
 import SidebarLayout from "../common/SidebarLayout";
 import DropdownMenu from "../common/DropdownMenu";
 import type { DropdownItem } from "../common/DropdownMenu";
@@ -131,6 +132,15 @@ const ChannelList: Component = () => {
     channels().filter((c) => c.category_id === catId);
 
   const community = () => activeCommunity();
+
+  // only owners and admins can create channels/categories or reorder
+  const canManage = () => {
+    const id = identity();
+    if (!id) return false;
+    const member = members().find((m) => m.peer_id === id.peer_id);
+    if (!member) return false;
+    return member.roles.some((r) => r === "owner" || r === "admin");
+  };
 
   const toggleSection = (id: string) => {
     setCollapsedSections((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -249,7 +259,7 @@ const ChannelList: Component = () => {
         />
         {props.label}
       </button>
-      <Show when={props.showAdd && community()}>
+      <Show when={props.showAdd && community() && canManage()}>
         <button
           type="button"
           class="text-white/30 hover:text-white/60 transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange"
@@ -480,7 +490,10 @@ const ChannelList: Component = () => {
         {/* create channel / create category buttons when no channels exist yet */}
         <Show
           when={
-            channels().length === 0 && categories().length === 0 && community()
+            channels().length === 0 &&
+            categories().length === 0 &&
+            community() &&
+            canManage()
           }
         >
           <div class="px-2 mt-2">
@@ -496,7 +509,7 @@ const ChannelList: Component = () => {
         </Show>
 
         {/* create category button */}
-        <Show when={community()}>
+        <Show when={community() && canManage()}>
           <div class="px-2 mt-3 border-t border-white/5 pt-3">
             <button
               type="button"
