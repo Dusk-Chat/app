@@ -548,6 +548,9 @@ pub async fn start(
         // deferred warning timer -- only notify the frontend after the grace
         // period expires so transient disconnections don't flash the banner
         let mut relay_warn_at: Option<tokio::time::Instant> = None;
+        // deferred sync+presence re-broadcast after a new peer connects,
+        // giving gossipsub mesh time to form before publishing
+        let mut deferred_sync_at: Option<tokio::time::Instant> = None;
         // next instant at which we should attempt a relay reconnect
         let mut relay_retry_at: Option<tokio::time::Instant> = if relay_multiaddr.is_some() {
             // schedule initial retry in case the first dial failed synchronously
@@ -1386,14 +1389,14 @@ pub async fn start(
                                 }
                             }
 
-                            // request sync from newly connected peers
-                            let local_peer_id = *swarm_instance.local_peer_id();
-                            let request = crate::crdt::sync::SyncMessage::RequestSync {
-                                peer_id: local_peer_id.to_string(),
-                            };
-                            if let Ok(data) = serde_json::to_vec(&request) {
-                                let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
-                                let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                            // schedule a deferred sync request so the gossipsub
+                            // mesh has time to form before we publish. publishing
+                            // immediately after add_explicit_peer often means the
+                            // new peer isn't in the mesh yet and never sees it.
+                            if Some(peer_id) != relay_peer {
+                                deferred_sync_at = Some(
+                                    tokio::time::Instant::now() + std::time::Duration::from_secs(2),
+                                );
                             }
 
                             // re-announce our profile so the new peer adds us to
@@ -1706,6 +1709,62 @@ pub async fn start(
                     // grace period expired and we still don't have a relay connection
                     if !relay_reservation_active {
                         let _ = app_handle.emit("dusk-event", DuskEvent::RelayStatus { connected: false });
+                    }
+                }
+
+                // deferred sync+presence after a new peer connection. the delay
+                // lets the gossipsub mesh stabilize so the messages actually reach
+                // the new peer instead of being published into the void.
+                _ = tokio::time::sleep_until(
+                    deferred_sync_at.unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(86400))
+                ), if deferred_sync_at.is_some() => {
+                    deferred_sync_at = None;
+
+                    // publish sync request
+                    let local_peer_id = *swarm_instance.local_peer_id();
+                    let request = crate::crdt::sync::SyncMessage::RequestSync {
+                        peer_id: local_peer_id.to_string(),
+                    };
+                    if let Ok(data) = serde_json::to_vec(&request) {
+                        let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
+                        let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                    }
+
+                    // re-broadcast presence so the new peer knows we're online
+                    let local_id = local_peer_id.to_string();
+                    let presence_status = storage
+                        .load_settings()
+                        .map(|s| match s.status.as_str() {
+                            "idle" => crate::protocol::messages::PeerStatus::Idle,
+                            "dnd" => crate::protocol::messages::PeerStatus::Dnd,
+                            "invisible" => crate::protocol::messages::PeerStatus::Offline,
+                            _ => crate::protocol::messages::PeerStatus::Online,
+                        })
+                        .unwrap_or(crate::protocol::messages::PeerStatus::Online);
+                    let display_name = storage
+                        .load_profile()
+                        .map(|p| p.display_name)
+                        .unwrap_or_else(|_| "unknown".to_string());
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    let update = crate::protocol::messages::PresenceUpdate {
+                        peer_id: local_id,
+                        display_name,
+                        status: presence_status,
+                        timestamp: now,
+                    };
+                    let msg = crate::protocol::messages::GossipMessage::Presence(update);
+                    if let Ok(data) = serde_json::to_vec(&msg) {
+                        let engine = crdt_engine.lock().await;
+                        let community_ids = engine.community_ids();
+                        drop(engine);
+                        for cid in community_ids {
+                            let topic_str = gossip::topic_for_presence(&cid);
+                            let ident_topic = libp2p::gossipsub::IdentTopic::new(topic_str);
+                            let _ = swarm_instance.behaviour_mut().gossipsub.publish(ident_topic, data.clone());
+                        }
                     }
                 }
 
