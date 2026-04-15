@@ -624,9 +624,11 @@ pub async fn start(
                             if topic_str == gossip::topic_for_sync() {
                                 if let Ok(sync_msg) = serde_json::from_slice::<crate::crdt::sync::SyncMessage>(&message.data) {
                                     match sync_msg {
-                                        crate::crdt::sync::SyncMessage::RequestSync { .. } => {
+                                        crate::crdt::sync::SyncMessage::RequestSync { peer_id: requesting_peer } => {
+                                            log::info!("sync: received RequestSync from {}", requesting_peer);
                                             let mut engine = crdt_engine.lock().await;
                                             let ids = engine.community_ids();
+                                            log::info!("sync: responding with DocumentOffer for {} communities", ids.len());
                                             for cid in ids {
                                                 if let Some(doc_bytes) = engine.get_doc_bytes(&cid) {
                                                     let snapshot = crate::crdt::sync::DocumentSnapshot {
@@ -642,17 +644,35 @@ pub async fn start(
                                             }
                                         }
                                         crate::crdt::sync::SyncMessage::DocumentOffer(snapshot) => {
+                                            log::info!(
+                                                "sync: received DocumentOffer for community {} ({} bytes)",
+                                                snapshot.community_id,
+                                                snapshot.doc_bytes.len()
+                                            );
                                             let mut engine = crdt_engine.lock().await;
 
                                             // only merge docs for communities we've explicitly joined or created,
                                             // otherwise any LAN peer would push all their communities to us
                                             if !engine.has_community(&snapshot.community_id) {
-                                                log::debug!("ignoring document offer for unknown community {}", snapshot.community_id);
+                                                log::info!("sync: ignoring document offer for unknown community {}", snapshot.community_id);
                                                 continue;
                                             }
 
                                             let community_id = snapshot.community_id.clone();
                                             let merge_result = engine.merge_remote_doc(&community_id, &snapshot.doc_bytes);
+                                            match &merge_result {
+                                                Ok(()) => {
+                                                    let member_count = engine.get_members(&community_id)
+                                                        .map(|m| m.len()).unwrap_or(0);
+                                                    log::info!(
+                                                        "sync: merge success for community {}, now have {} members",
+                                                        community_id, member_count
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    log::warn!("sync: merge failed for community {}: {}", community_id, e);
+                                                }
+                                            }
                                             let channels_after_merge = if merge_result.is_ok() {
                                                 engine.get_channels(&community_id).unwrap_or_default()
                                             } else {
@@ -1389,13 +1409,26 @@ pub async fn start(
                                 }
                             }
 
-                            // schedule a deferred sync request so the gossipsub
-                            // mesh has time to form before we publish. publishing
-                            // immediately after add_explicit_peer often means the
-                            // new peer isn't in the mesh yet and never sees it.
+                            // publish a sync request immediately -- now that the
+                            // relay subscribes to dusk/sync it can forward this
+                            // even before the direct peer mesh forms
+                            let local_peer_id = *swarm_instance.local_peer_id();
+                            let request = crate::crdt::sync::SyncMessage::RequestSync {
+                                peer_id: local_peer_id.to_string(),
+                            };
+                            if let Ok(data) = serde_json::to_vec(&request) {
+                                let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
+                                match swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data) {
+                                    Ok(id) => log::info!("sync: published RequestSync on connect (msg_id={:?})", id),
+                                    Err(e) => log::warn!("sync: RequestSync publish failed on connect: {:?}", e),
+                                }
+                            }
+
+                            // also schedule a deferred retry in case the mesh
+                            // wasn't ready for the immediate publish
                             if Some(peer_id) != relay_peer {
                                 deferred_sync_at = Some(
-                                    tokio::time::Instant::now() + std::time::Duration::from_secs(2),
+                                    tokio::time::Instant::now() + std::time::Duration::from_secs(3),
                                 );
                             }
 
@@ -1720,6 +1753,18 @@ pub async fn start(
                 ), if deferred_sync_at.is_some() => {
                     deferred_sync_at = None;
 
+                    let peers_in_mesh: Vec<_> = swarm_instance
+                        .behaviour()
+                        .gossipsub
+                        .all_peers()
+                        .map(|(p, _)| p.to_string())
+                        .collect();
+                    log::info!(
+                        "deferred sync firing: {} gossipsub peers: {:?}",
+                        peers_in_mesh.len(),
+                        peers_in_mesh
+                    );
+
                     // publish sync request
                     let local_peer_id = *swarm_instance.local_peer_id();
                     let request = crate::crdt::sync::SyncMessage::RequestSync {
@@ -1727,7 +1772,10 @@ pub async fn start(
                     };
                     if let Ok(data) = serde_json::to_vec(&request) {
                         let sync_topic = libp2p::gossipsub::IdentTopic::new(gossip::topic_for_sync());
-                        let _ = swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data);
+                        match swarm_instance.behaviour_mut().gossipsub.publish(sync_topic, data) {
+                            Ok(msg_id) => log::info!("deferred sync: RequestSync published (msg_id={:?})", msg_id),
+                            Err(e) => log::warn!("deferred sync: RequestSync publish failed: {:?}", e),
+                        }
                     }
 
                     // re-broadcast presence so the new peer knows we're online
@@ -1772,8 +1820,11 @@ pub async fn start(
                     match cmd {
                         Some(NodeCommand::Shutdown) | None => break,
                         Some(NodeCommand::SendMessage { topic, data }) => {
-                            let ident_topic = libp2p::gossipsub::IdentTopic::new(topic);
-                            let _ = swarm_instance.behaviour_mut().gossipsub.publish(ident_topic, data);
+                            let ident_topic = libp2p::gossipsub::IdentTopic::new(topic.clone());
+                            match swarm_instance.behaviour_mut().gossipsub.publish(ident_topic, data) {
+                                Ok(msg_id) => log::debug!("gossipsub publish ok on '{}' (msg_id={:?})", topic, msg_id),
+                                Err(e) => log::warn!("gossipsub publish failed on '{}': {:?}", topic, e),
+                            }
                         }
                         Some(NodeCommand::Subscribe { topic }) => {
                             let ident_topic = libp2p::gossipsub::IdentTopic::new(topic);
