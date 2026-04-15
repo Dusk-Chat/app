@@ -260,6 +260,56 @@ pub fn get_categories(doc: &AutoCommit, community_id: &str) -> Result<Vec<Catego
     Ok(result)
 }
 
+// update a category's name
+pub fn update_category(
+    doc: &mut AutoCommit,
+    category_id: &str,
+    name: &str,
+) -> Result<(), automerge::AutomergeError> {
+    let categories = doc
+        .get(ROOT, "categories")?
+        .map(|(_, id)| id)
+        .ok_or_else(|| {
+            automerge::AutomergeError::InvalidObjId("categories not found".to_string())
+        })?;
+
+    let cat = doc
+        .get(&categories, category_id)?
+        .map(|(_, id)| id)
+        .ok_or_else(|| {
+            automerge::AutomergeError::InvalidObjId("category not found".to_string())
+        })?;
+
+    doc.put(&cat, "name", name)?;
+
+    Ok(())
+}
+
+// reorder categories by updating their positions
+pub fn reorder_categories(
+    doc: &mut AutoCommit,
+    community_id: &str,
+    category_ids: &[String],
+) -> Result<Vec<CategoryMeta>, String> {
+    let categories_obj = doc
+        .get(ROOT, "categories")
+        .map_err(|e| e.to_string())?
+        .map(|(_, id)| id)
+        .ok_or("categories key not found")?;
+
+    for (index, category_id) in category_ids.iter().enumerate() {
+        if let Some((_, cat_obj)) = doc
+            .get(&categories_obj, category_id)
+            .map_err(|e| e.to_string())?
+        {
+            doc.put(&cat_obj, "position", index as i64)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    get_categories(doc, community_id)
+}
+
 // read all channels from the community document
 pub fn get_channels(doc: &AutoCommit, community_id: &str) -> Result<Vec<ChannelMeta>, String> {
     let channels_obj = doc
@@ -536,6 +586,58 @@ pub fn get_message_by_id(
     }
 
     Ok(None)
+}
+
+// edit a message's content and mark it as edited
+pub fn edit_message_by_id(
+    doc: &mut AutoCommit,
+    message_id: &str,
+    new_content: &str,
+) -> Result<(), String> {
+    let channels_obj = doc
+        .get(ROOT, "channels")
+        .map_err(|e| e.to_string())?
+        .map(|(_, id)| id)
+        .ok_or("channels key not found")?;
+
+    let keys: Vec<String> = doc.keys(&channels_obj).collect();
+
+    for channel_key in keys {
+        let ch_obj = doc
+            .get(&channels_obj, &channel_key)
+            .map_err(|e| e.to_string())?
+            .map(|(_, id)| id);
+
+        if let Some(ch_id) = ch_obj {
+            let messages = doc
+                .get(&ch_id, "messages")
+                .map_err(|e| e.to_string())?
+                .map(|(_, id)| id);
+
+            if let Some(msgs_id) = messages {
+                let len = doc.length(&msgs_id);
+                for i in 0..len {
+                    let msg_obj = doc
+                        .get(&msgs_id, i)
+                        .map_err(|e| e.to_string())?
+                        .map(|(_, id)| id);
+
+                    if let Some(msg_obj_id) = msg_obj {
+                        let id = get_str(doc, &msg_obj_id, "id").unwrap_or_default();
+                        if id == message_id {
+                            doc.put(&msg_obj_id, "content", new_content)
+                                .map_err(|e| e.to_string())?;
+                            doc.put(&msg_obj_id, "edited", true)
+                                .map_err(|e| e.to_string())?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err(format!("message {} not found", message_id))
 }
 
 // delete a message by id from any channel in the community

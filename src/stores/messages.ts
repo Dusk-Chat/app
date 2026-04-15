@@ -18,6 +18,14 @@ export function clearMessages() {
   setHasMore(true);
 }
 
+export function updateMessage(messageId: string, newContent: string) {
+  setMessages((prev) =>
+    prev.map((m) =>
+      m.id === messageId ? { ...m, content: newContent, edited: true } : m,
+    ),
+  );
+}
+
 export function removeMessage(messageId: string) {
   setMessages((prev) => prev.filter((m) => m.id !== messageId));
 }

@@ -57,6 +57,7 @@ import {
   addMessage,
   setMessages,
   clearMessages,
+  updateMessage,
   removeMessage,
 } from "./stores/messages";
 import {
@@ -422,6 +423,12 @@ const App: Component = () => {
         }
         break;
       }
+      case "message_edited":
+        updateMessage(
+          event.payload.message_id,
+          event.payload.new_content,
+        );
+        break;
       case "message_deleted":
         removeMessage(event.payload.message_id);
         break;

@@ -202,6 +202,21 @@ export async function deleteCategory(
   return invoke("delete_category", { communityId, categoryId });
 }
 
+export async function updateCategory(
+  communityId: string,
+  categoryId: string,
+  name: string,
+): Promise<CategoryMeta> {
+  return invoke("update_category", { communityId, categoryId, name });
+}
+
+export async function reorderCategories(
+  communityId: string,
+  categoryIds: string[],
+): Promise<CategoryMeta[]> {
+  return invoke("reorder_categories", { communityId, categoryIds });
+}
+
 export async function setMemberRole(
   communityId: string,
   memberPeerId: string,
@@ -249,6 +264,14 @@ export async function broadcastPresence(status: string): Promise<void> {
 }
 
 // -- moderation --
+
+export async function editMessage(
+  communityId: string,
+  messageId: string,
+  newContent: string,
+): Promise<void> {
+  return invoke("edit_message", { communityId, messageId, newContent });
+}
 
 export async function deleteMessage(
   communityId: string,

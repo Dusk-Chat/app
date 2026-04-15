@@ -113,6 +113,10 @@ pub enum GossipMessage {
     Typing(TypingIndicator),
     Presence(PresenceUpdate),
     MetaUpdate(super::community::CommunityMeta),
+    EditMessage {
+        message_id: String,
+        new_content: String,
+    },
     DeleteMessage {
         message_id: String,
     },

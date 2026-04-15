@@ -313,6 +313,23 @@ impl CrdtEngine {
         document::get_message_by_id(doc, message_id)
     }
 
+    // edit a message's content by id
+    pub fn edit_message(
+        &mut self,
+        community_id: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::edit_message_by_id(doc, message_id, new_content)?;
+        self.persist(community_id)?;
+        Ok(())
+    }
+
     // delete a message by id
     pub fn delete_message(&mut self, community_id: &str, message_id: &str) -> Result<(), String> {
         let doc = self
@@ -429,6 +446,41 @@ impl CrdtEngine {
 
         self.persist(community_id)?;
         Ok(())
+    }
+
+    // update a category's name
+    pub fn update_category(
+        &mut self,
+        community_id: &str,
+        category_id: &str,
+        name: &str,
+    ) -> Result<(), String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        document::update_category(doc, category_id, name)
+            .map_err(|e| format!("failed to update category: {}", e))?;
+
+        self.persist(community_id)?;
+        Ok(())
+    }
+
+    // reorder categories by updating their positions
+    pub fn reorder_categories(
+        &mut self,
+        community_id: &str,
+        category_ids: &[String],
+    ) -> Result<Vec<CategoryMeta>, String> {
+        let doc = self
+            .documents
+            .get_mut(community_id)
+            .ok_or("community not found")?;
+
+        let categories = document::reorder_categories(doc, community_id, category_ids)?;
+        self.persist(community_id)?;
+        Ok(categories)
     }
 
     // remove a category and ungroup its channels

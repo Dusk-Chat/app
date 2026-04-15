@@ -56,6 +56,9 @@ pub fn run() {
     // load .env from the project root so config like DUSK_RELAY_ADDR is available
     dotenvy::dotenv().ok();
 
+    // initialize the logger so RUST_LOG=info actually produces output
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -140,6 +143,7 @@ pub fn run() {
             commands::community::create_channel,
             commands::community::get_channels,
             commands::community::get_members,
+            commands::community::edit_message,
             commands::community::delete_message,
             commands::community::kick_member,
             commands::community::generate_invite,
@@ -150,6 +154,8 @@ pub fn run() {
             commands::community::update_channel,
             commands::community::delete_channel,
             commands::community::delete_category,
+            commands::community::update_category,
+            commands::community::reorder_categories,
             commands::community::set_member_role,
             commands::community::transfer_ownership,
             commands::voice::join_voice_channel,

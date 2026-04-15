@@ -577,6 +577,55 @@ pub async fn get_members(
 }
 
 #[tauri::command]
+pub async fn edit_message(
+    state: State<'_, AppState>,
+    community_id: String,
+    message_id: String,
+    new_content: String,
+) -> Result<(), String> {
+    if new_content.trim().is_empty() {
+        return Err("message content cannot be empty".to_string());
+    }
+
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let peer_id_str = id.peer_id.to_string();
+    drop(identity);
+
+    // verify the user is the message author
+    let mut engine = state.crdt_engine.lock().await;
+    let message = engine
+        .get_message(&community_id, &message_id)?
+        .ok_or_else(|| format!("message {} not found", message_id))?;
+
+    if message.author_id != peer_id_str {
+        return Err("not authorized to edit this message".to_string());
+    }
+
+    let channel_id = message.channel_id.clone();
+    engine.edit_message(&community_id, &message_id, &new_content)?;
+    drop(engine);
+
+    // broadcast the edit to the correct channel topic
+    let node_handle = state.node_handle.lock().await;
+    if let Some(ref handle) = *node_handle {
+        let topic = gossip::topic_for_messages(&community_id, &channel_id);
+        let edit_msg = crate::protocol::messages::GossipMessage::EditMessage {
+            message_id: message_id.clone(),
+            new_content: new_content.clone(),
+        };
+        if let Ok(data) = serde_json::to_vec(&edit_msg) {
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::SendMessage { topic, data })
+                .await;
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn delete_message(
     state: State<'_, AppState>,
     community_id: String,
@@ -587,38 +636,33 @@ pub async fn delete_message(
     let peer_id_str = id.peer_id.to_string();
     drop(identity);
 
-    // verify the user is the message author or has admin rights
+    // verify the user is the message author
     let mut engine = state.crdt_engine.lock().await;
     let message = engine
         .get_message(&community_id, &message_id)?
         .ok_or_else(|| format!("message {} not found", message_id))?;
 
-    // only allow deletion by the author
     if message.author_id != peer_id_str {
         return Err("not authorized to delete this message".to_string());
     }
 
+    // capture the channel id before deleting so we broadcast to the right topic
+    let channel_id = message.channel_id.clone();
     engine.delete_message(&community_id, &message_id)?;
     drop(engine);
 
-    // broadcast the deletion to peers
+    // broadcast the deletion to the correct channel topic only
     let node_handle = state.node_handle.lock().await;
     if let Some(ref handle) = *node_handle {
-        // find the channel for this message to get the correct topic
-        let engine = state.crdt_engine.lock().await;
-        if let Ok(channels) = engine.get_channels(&community_id) {
-            for channel in &channels {
-                let topic = gossip::topic_for_messages(&community_id, &channel.id);
-                let deletion = crate::protocol::messages::GossipMessage::DeleteMessage {
-                    message_id: message_id.clone(),
-                };
-                if let Ok(data) = serde_json::to_vec(&deletion) {
-                    let _ = handle
-                        .command_tx
-                        .send(NodeCommand::SendMessage { topic, data })
-                        .await;
-                }
-            }
+        let topic = gossip::topic_for_messages(&community_id, &channel_id);
+        let deletion = crate::protocol::messages::GossipMessage::DeleteMessage {
+            message_id: message_id.clone(),
+        };
+        if let Ok(data) = serde_json::to_vec(&deletion) {
+            let _ = handle
+                .command_tx
+                .send(NodeCommand::SendMessage { topic, data })
+                .await;
         }
     }
 
@@ -877,6 +921,67 @@ pub async fn delete_category(
     broadcast_sync(&state, &community_id).await;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn update_category(
+    state: State<'_, AppState>,
+    community_id: String,
+    category_id: String,
+    name: String,
+) -> Result<CategoryMeta, String> {
+    if name.trim().is_empty() {
+        return Err("category name cannot be empty".to_string());
+    }
+
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    engine.update_category(&community_id, &category_id, &name)?;
+    let categories = engine.get_categories(&community_id)?;
+    drop(engine);
+
+    let category = categories
+        .into_iter()
+        .find(|c| c.id == category_id)
+        .ok_or("category not found after update")?;
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(category)
+}
+
+#[tauri::command]
+pub async fn reorder_categories(
+    state: State<'_, AppState>,
+    community_id: String,
+    category_ids: Vec<String>,
+) -> Result<Vec<CategoryMeta>, String> {
+    let identity = state.identity.lock().await;
+    let id = identity.as_ref().ok_or("no identity loaded")?;
+    let requester_id = id.peer_id.to_string();
+    drop(identity);
+
+    let engine = state.crdt_engine.lock().await;
+    let members = engine.get_members(&community_id)?;
+    check_permission(&members, &requester_id, &["owner", "admin"])?;
+    drop(engine);
+
+    let mut engine = state.crdt_engine.lock().await;
+    let categories = engine.reorder_categories(&community_id, &category_ids)?;
+    drop(engine);
+
+    broadcast_sync(&state, &community_id).await;
+
+    Ok(categories)
 }
 
 #[tauri::command]

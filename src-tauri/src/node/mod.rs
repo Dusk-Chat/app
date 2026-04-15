@@ -229,6 +229,11 @@ pub enum NodeCommand {
 pub enum DuskEvent {
     #[serde(rename = "message_received")]
     MessageReceived(crate::protocol::messages::ChatMessage),
+    #[serde(rename = "message_edited")]
+    MessageEdited {
+        message_id: String,
+        new_content: String,
+    },
     #[serde(rename = "message_deleted")]
     MessageDeleted { message_id: String },
     #[serde(rename = "member_kicked")]
@@ -771,6 +776,13 @@ pub async fn start(
                                             peer_id: indicator.peer_id,
                                             channel_id: indicator.channel_id,
                                         });
+                                    }
+                                    crate::protocol::messages::GossipMessage::EditMessage { message_id, new_content } => {
+                                        if let Some(community_id) = community_id_from_topic(&topic_str) {
+                                            let mut engine = crdt_engine.lock().await;
+                                            let _ = engine.edit_message(community_id, &message_id, &new_content);
+                                        }
+                                        let _ = app_handle.emit("dusk-event", DuskEvent::MessageEdited { message_id, new_content });
                                     }
                                     crate::protocol::messages::GossipMessage::DeleteMessage { message_id } => {
                                         if let Some(community_id) = community_id_from_topic(&topic_str) {

@@ -197,6 +197,10 @@ export interface GifResponse {
 // discriminated union for events emitted from rust
 export type DuskEvent =
   | { kind: "message_received"; payload: ChatMessage }
+  | {
+      kind: "message_edited";
+      payload: { message_id: string; new_content: string };
+    }
   | { kind: "message_deleted"; payload: { message_id: string } }
   | { kind: "member_kicked"; payload: { peer_id: string } }
   | { kind: "peer_connected"; payload: { peer_id: string } }
